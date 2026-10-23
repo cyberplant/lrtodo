@@ -1,0 +1,24 @@
+{
+  "name": "lrtodo-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "wasm": "wasm-pack build ../crates/lrtodo-wasm --target web --release --out-dir ../../web/src/lib/wasm --no-pack",
+    "dev": "npm run wasm && vite",
+    "build": "npm run wasm && vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tsconfig/svelte": "5.0.8",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vite-plugin-pwa": "2.0.0",
+    "workbox-window": "7.4.1"
+  }
+}

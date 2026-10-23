@@ -1,0 +1,19 @@
+[package]
+name = "lrtodo-ha"
+description = "lrtodo: listas todo de Home Assistant como backend remoto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lrtodo-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock.workspace = true

@@ -1,0 +1,7 @@
+/target
+node_modules/
+/web/dist/
+/web/src/lib/wasm/
+.DS_Store
+/web/test-results/
+/web/playwright-report/

@@ -1,0 +1,42 @@
+name: lrtodo
+version: "0.1.0"
+slug: lrtodo
+description: Tareas offline-first en YAML, con PWA y tus listas todo de Home Assistant
+url: https://github.com/cyberplant/lrtodo
+arch:
+  - aarch64
+  - amd64
+image: ghcr.io/cyberplant/lrtodo
+init: false
+startup: application
+boot: auto
+# Acceso a la API de HA con SUPERVISOR_TOKEN (no hace falta un long-lived token).
+homeassistant_api: true
+# Los YAML quedan en /share/lrtodo: editables por Samba/SSH y versionables con git.
+map:
+  - share:rw
+ingress: true
+ingress_port: 8765
+panel_icon: mdi:checkbox-marked-outline
+panel_title: Tareas
+# Puerto propio para instalar la PWA en el celular (origen propio para el service worker).
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: PWA y API de lrtodo
+options:
+  data_dir: /share/lrtodo
+  token: ""
+  ha_include: []
+  ha_exclude: []
+  poll_secs: 30
+  log_level: info
+schema:
+  data_dir: str
+  token: password?
+  ha_include:
+    - str
+  ha_exclude:
+    - str
+  poll_secs: int(5,3600)
+  log_level: list(trace|debug|info|warn|error)

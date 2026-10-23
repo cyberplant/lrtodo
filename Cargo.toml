@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/cyberplant/lrtodo"
+
+[workspace.dependencies]
+lrtodo-core = { path = "crates/lrtodo-core" }
+lrtodo-store = { path = "crates/lrtodo-store" }
+lrtodo-ha = { path = "crates/lrtodo-ha" }
+lrtodo-server = { path = "crates/lrtodo-server" }
+
+anyhow = "1.0.104"
+assert_cmd = "2.2.2"
+async-trait = "0.1.92"
+axum = "0.8.9"
+blake3 = "1.8.7"
+chrono = { version = "0.4.45", default-features = false, features = ["alloc", "std", "serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+dirs = "7.0.0"
+futures = "0.3.34"
+mime_guess = "2.0.5"
+notify = "8.2.0"
+proptest = "1.12.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rust-embed = "8.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_yaml_ng = "0.10.0"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tower-http = { version = "0.7.1", features = ["cors"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+wasm-bindgen = "=0.2.128"
+wiremock = "0.6.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.release.package.lrtodo-wasm]
+opt-level = "s"

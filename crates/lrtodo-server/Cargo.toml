@@ -1,0 +1,28 @@
+[package]
+name = "lrtodo-server"
+description = "lrtodo: servidor de sincronización + PWA"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+futures.workspace = true
+lrtodo-core.workspace = true
+lrtodo-ha.workspace = true
+lrtodo-store.workspace = true
+mime_guess.workspace = true
+notify.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { version = "0.5.2", features = ["util"] }
+http-body-util = "0.1.3"

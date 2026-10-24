@@ -297,7 +297,8 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         .block(popup(title)),
         rect,
     );
-    let x = rect.x + 2 + prompt.chars().count() as u16 + buf.pos as u16;
+    // Borde (1) + "prompt: " + posición dentro del texto.
+    let x = rect.x + 3 + prompt.chars().count() as u16 + buf.pos as u16;
     f.set_cursor_position((x.min(rect.x + rect.width - 2), rect.y + 1));
 }
 
@@ -328,7 +329,8 @@ fn draw_form(f: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     f.render_widget(Paragraph::new(lines).block(popup("Editar tarea")), rect);
     let cur = &fields[*sel];
-    let x = rect.x + 2 + label_w + cur.buf.pos as u16;
+    // Borde (1) + "label: " (label_w + 2) + posición dentro del texto.
+    let x = rect.x + 3 + label_w + cur.buf.pos as u16;
     f.set_cursor_position((x.min(rect.x + rect.width - 2), rect.y + 1 + *sel as u16));
 }
 

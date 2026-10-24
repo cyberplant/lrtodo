@@ -152,7 +152,7 @@ impl App {
             sel_list: 0,
             tasks: vec![],
             sel_task: 0,
-            focus: Focus::Tasks,
+            focus: Focus::Lists,
             mode: Mode::Normal,
             show_done: true,
             filter: String::new(),
@@ -330,11 +330,10 @@ impl App {
             KeyCode::Home => self.move_sel(isize::MIN),
             KeyCode::PageDown => self.move_sel(10),
             KeyCode::PageUp => self.move_sel(-10),
-            KeyCode::Enter => match self.focus {
+            KeyCode::Enter | KeyCode::Char(' ') => match self.focus {
                 Focus::Lists => self.focus = Focus::Tasks,
                 Focus::Tasks => self.toggle(),
             },
-            KeyCode::Char(' ') => self.toggle(),
             KeyCode::Char('a') => {
                 self.mode = Mode::Input {
                     kind: InputKind::AddTask,
@@ -353,9 +352,10 @@ impl App {
                     buf: Line::new(self.filter.clone()),
                 };
             }
-            KeyCode::Char('e') => self.open_form(),
-            KeyCode::Char('d') => self.ask_delete(),
-            KeyCode::Char('m') => self.open_picker(),
+            // Mutan la tarea seleccionada: sólo con el panel de tareas activo.
+            KeyCode::Char('e') if self.focus == Focus::Tasks => self.open_form(),
+            KeyCode::Char('d') if self.focus == Focus::Tasks => self.ask_delete(),
+            KeyCode::Char('m') if self.focus == Focus::Tasks => self.open_picker(),
             KeyCode::Char('E') => {
                 if let Some(list) = self.current_list_id() {
                     self.effect = Some(Effect::Edit { list });

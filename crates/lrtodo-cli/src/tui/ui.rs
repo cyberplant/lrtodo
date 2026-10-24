@@ -237,7 +237,7 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
     let hint = match &app.mode {
         Mode::Normal => match app.focus {
             Focus::Lists => {
-                " j/k mover · enter ir a tareas · n nueva lista · tab/→ tareas · ? ayuda · q salir"
+                " j/k elegir lista · enter/espacio ir a tareas · n nueva lista · ? ayuda · q salir"
             }
             Focus::Tasks => {
                 " espacio tildar · a agregar · e editar · d borrar · m mover · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"

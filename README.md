@@ -29,8 +29,9 @@ lrtodo serve                             # API + PWA en http://0.0.0.0:8765
 ```
 
 Comandos: `lists`, `ls`, `add`, `done`, `undo`, `rm`, `set`, `mv`, `edit`, `new`,
-`convert`, `check`, `sync`, `status`, `tui` y `serve`. Con `--json` la salida es
-JSON. `lrtodo` a secas abre la TUI si está en una terminal (en un pipe, lista).
+`rmlist`, `convert`, `check`, `sync`, `status`, `tui` y `serve`. Con `--json` la
+salida es JSON. `lrtodo` a secas abre la TUI si está en una terminal (en un
+pipe, lista).
 
 ### TUI
 
@@ -41,9 +42,10 @@ la barra de abajo muestra "al día", "sincronizando…", "sin conexión" y los
 cambios pendientes.
 
 Teclas: `j`/`k` moverse, `tab`/`h`/`l` cambiar de panel, `espacio`/`enter`
-tildar, `a` agregar, `e` editar (formulario), `d` borrar, `m` mover, `n` crear
-lista (`id|nombre`), `/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista
-en `$EDITOR`, `r` sincronizar, `?` ayuda, `q` salir.
+tildar, `a` agregar, `e` editar (formulario), `d` borrar tarea, `m` mover, `n`
+crear lista (`id|nombre`), `D` borrar la lista entera (pide tipear el id para
+confirmar), `/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista en
+`$EDITOR`, `r` sincronizar, `?` ayuda, `q` salir.
 
 ## Configuración (`~/.config/lrtodo/config.yaml`)
 

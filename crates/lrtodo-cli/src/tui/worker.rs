@@ -49,6 +49,9 @@ pub enum Call {
         id: String,
         name: Option<String>,
     },
+    DeleteList {
+        id: String,
+    },
 }
 
 pub enum CallOut {
@@ -113,6 +116,7 @@ fn run(
                         | Call::Delete { .. }
                         | Call::Move { .. }
                         | Call::CreateList { .. }
+                        | Call::DeleteList { .. }
                 );
                 if out.send(dispatch(backend, *call)).is_err() {
                     return;
@@ -152,6 +156,10 @@ fn dispatch(b: &mut dyn Backend, call: Call) -> anyhow::Result<CallOut> {
         Call::Move { from, id, to } => CallOut::Id(b.move_task(&from, &id, &to)?),
         Call::CreateList { id, name } => {
             b.create_list(&id, name.as_deref(), Layout::File)?;
+            CallOut::Unit
+        }
+        Call::DeleteList { id } => {
+            b.delete_list(&id)?;
             CallOut::Unit
         }
     })
@@ -284,6 +292,11 @@ impl Backend for ChanBackend {
             id: id.to_string(),
             name: name.map(str::to_string),
         })?;
+        Ok(())
+    }
+
+    fn delete_list(&mut self, id: &str) -> anyhow::Result<()> {
+        self.call(Call::DeleteList { id: id.to_string() })?;
         Ok(())
     }
 

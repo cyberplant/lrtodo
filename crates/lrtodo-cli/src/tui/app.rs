@@ -41,11 +41,13 @@ pub enum Mode {
     Help,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum InputKind {
     AddTask,
     NewList,
     Filter,
+    /// Borrar una lista: hay que tipear el id para confirmar.
+    DeleteList(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -346,6 +348,23 @@ impl App {
                     buf: Line::new(""),
                 };
             }
+            KeyCode::Char('D') if self.focus == Focus::Lists => {
+                if let Some(row) = self.lists.get(self.sel_list) {
+                    let id = row.info.meta.id.clone();
+                    if row.info.meta.kind == lrtodo_core::ListKind::HomeAssistant {
+                        self.flash = Some((
+                            "las listas de Home Assistant se quitan con `exclude` en la config"
+                                .into(),
+                            Instant::now(),
+                        ));
+                    } else {
+                        self.mode = Mode::Input {
+                            kind: InputKind::DeleteList(id),
+                            buf: Line::new(""),
+                        };
+                    }
+                }
+            }
             KeyCode::Char('/') => {
                 self.mode = Mode::Input {
                     kind: InputKind::Filter,
@@ -400,7 +419,7 @@ impl App {
         match key.code {
             KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
-                let kind = *kind;
+                let kind = kind.clone();
                 let text = buf.text();
                 self.mode = Mode::Normal;
                 self.submit_input(kind, text);
@@ -454,6 +473,22 @@ impl App {
                 }
             }
             InputKind::Filter => self.filter = text.trim().to_string(),
+            InputKind::DeleteList(id) => {
+                if text.trim() != id {
+                    self.flash = Some((
+                        format!("no coincide con «{id}»; no se borró nada"),
+                        Instant::now(),
+                    ));
+                    return;
+                }
+                match self.chan.delete_list(&id) {
+                    Ok(()) => {
+                        self.flash = Some((format!("lista «{id}» borrada"), Instant::now()));
+                        self.refresh_all();
+                    }
+                    Err(e) => self.flash_err("borrar lista", e),
+                }
+            }
         }
     }
 

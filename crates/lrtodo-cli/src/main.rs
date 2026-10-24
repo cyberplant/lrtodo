@@ -114,6 +114,8 @@ enum Cmd {
         #[arg(long, default_value = "file")]
         layout: Layout,
     },
+    /// Borra una lista entera, con sus tareas (irreversible).
+    RmList { id: String },
     /// Cambia el layout de una lista (sólo modo local).
     Convert {
         id: String,
@@ -289,6 +291,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             eprintln!("{n} cambio(s) aplicado(s)");
         }
         Cmd::New { id, name, layout } => backend.create_list(&id, name.as_deref(), layout)?,
+        Cmd::RmList { id } => backend.delete_list(&id)?,
         Cmd::Convert { id, layout } => {
             let local = local
                 .as_ref()

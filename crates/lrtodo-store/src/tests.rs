@@ -163,6 +163,39 @@ fn concurrent_writers_do_not_lose_updates() {
 }
 
 #[test]
+fn remove_list_deletes_data_and_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), "t").unwrap();
+    for (id, layout) in [("a", Layout::File), ("b", Layout::Dir)] {
+        store.create_list(id, None, layout).unwrap();
+        store
+            .mutate(id, |l| {
+                l.doc.apply(&add_op(id, "T1", "x", 1000), &Caps::ALL)
+            })
+            .unwrap();
+    }
+    assert_eq!(store.list_ids().unwrap(), ["a", "b"]);
+    store.remove_list("a").unwrap();
+    store.remove_list("b").unwrap();
+    assert_eq!(store.list_ids().unwrap(), Vec::<String>::new());
+    assert!(!dir.path().join("a.yaml").exists());
+    assert!(!dir.path().join("b").exists());
+    // El estado de sync también se fue.
+    assert!(
+        fs::read_dir(dir.path().join(".lrtodo/state"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    // Y se puede recrear limpio.
+    store.create_list("a", None, Layout::File).unwrap();
+    assert!(matches!(
+        store.remove_list("nada"),
+        Err(StoreError::NotFound(_))
+    ));
+}
+
+#[test]
 fn check_reports_problems() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(

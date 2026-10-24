@@ -237,7 +237,7 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
     let hint = match &app.mode {
         Mode::Normal => match app.focus {
             Focus::Lists => {
-                " j/k elegir lista · enter/espacio ir a tareas · n nueva lista · ? ayuda · q salir"
+                " j/k lista · enter ir a tareas · n nueva · D borrar · ? ayuda · q salir"
             }
             Focus::Tasks => {
                 " espacio tildar · a agregar · e editar · d borrar · m mover · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"
@@ -283,18 +283,27 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
     let (title, prompt) = match kind {
-        InputKind::AddTask => ("Agregar tarea", "tarea"),
-        InputKind::NewList => ("Nueva lista", "id|nombre"),
-        InputKind::Filter => ("Filtrar", "texto"),
+        InputKind::AddTask => ("Agregar tarea", "tarea".to_string()),
+        InputKind::NewList => ("Nueva lista", "id|nombre".to_string()),
+        InputKind::Filter => ("Filtrar", "texto".to_string()),
+        InputKind::DeleteList(id) => ("Borrar lista", format!("escribí «{id}»")),
     };
+    let danger = matches!(kind, InputKind::DeleteList(_));
     let rect = centered(area, 56, 3);
     f.render_widget(Clear, rect);
+    let mut block = popup(title);
+    if danger {
+        block = block.border_style(Style::default().fg(ERR));
+    }
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{prompt}: "), Style::default().fg(ACCENT)),
+            Span::styled(
+                format!("{prompt}: "),
+                Style::default().fg(if danger { ERR } else { ACCENT }),
+            ),
             Span::raw(buf.text()),
         ]))
-        .block(popup(title)),
+        .block(block),
         rect,
     );
     // Borde (1) + "prompt: " + posición dentro del texto.

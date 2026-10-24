@@ -282,6 +282,32 @@ impl Store {
         Ok((loaded, out))
     }
 
+    /// Borra una lista entera: los datos y el estado de sync (relojes y
+    /// lápidas). Si se vuelve a crear con el mismo id, empieza de cero.
+    /// Irreversible — el archivo de lock queda (es inofensivo y borrarlo
+    /// abriría una carrera con otro proceso que lo esté tomando).
+    pub fn remove_list(&self, id: &str) -> Result<()> {
+        validate_id(id)?;
+        let _lock = self.lock(id)?;
+        match self.layout(id)? {
+            Layout::File => {
+                let p = self.file_path(id);
+                fs::remove_file(&p).map_err(io_err(&p))?;
+            }
+            Layout::Dir => {
+                let p = self.dir_path(id);
+                fs::remove_dir_all(&p).map_err(io_err(&p))?;
+            }
+        }
+        let state = self.state_path(id);
+        match fs::remove_file(&state) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io_err(&state)(e)),
+        }
+        Ok(())
+    }
+
     /// Cambia el layout de una lista conservando su estado.
     pub fn convert(&self, id: &str, layout: Layout) -> Result<()> {
         validate_id(id)?;

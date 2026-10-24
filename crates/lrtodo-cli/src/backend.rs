@@ -65,6 +65,8 @@ pub trait Backend {
         Ok(new_id)
     }
     fn create_list(&mut self, id: &str, name: Option<&str>, layout: Layout) -> anyhow::Result<()>;
+    /// Borra una lista entera (irreversible).
+    fn delete_list(&mut self, id: &str) -> anyhow::Result<()>;
     /// Sincroniza (remoto). Devuelve un mensaje de estado para mostrar, si hay.
     fn sync(&mut self) -> anyhow::Result<Option<String>>;
     /// Pull incondicional (la TUI lo llama periódicamente y ante eventos).
@@ -217,6 +219,12 @@ impl Backend for Local {
 
     fn create_list(&mut self, id: &str, name: Option<&str>, layout: Layout) -> anyhow::Result<()> {
         self.store.create_list(id, name, layout)?;
+        Ok(())
+    }
+
+    fn delete_list(&mut self, id: &str) -> anyhow::Result<()> {
+        ensure_local(id)?;
+        self.store.remove_list(id)?;
         Ok(())
     }
 
@@ -410,6 +418,23 @@ impl Backend for Remote {
                 .send()
                 .await
                 .context("crear listas requiere conexión con el servidor")?;
+            if !resp.status().is_success() {
+                bail!("{}", resp.text().await.unwrap_or_default());
+            }
+            Ok(())
+        })?;
+        self.synced = false;
+        self.ensure_fresh();
+        Ok(())
+    }
+
+    fn delete_list(&mut self, id: &str) -> anyhow::Result<()> {
+        let http = self.request(self.http.delete(self.url(&format!("/api/lists/{id}"))));
+        self.rt.block_on(async {
+            let resp = http
+                .send()
+                .await
+                .context("borrar listas requiere conexión con el servidor")?;
             if !resp.status().is_success() {
                 bail!("{}", resp.text().await.unwrap_or_default());
             }

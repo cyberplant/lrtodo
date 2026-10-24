@@ -10,12 +10,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::{Query, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::Stream;
 use lrtodo_core::{Clock, ListInfo, ListSnapshot, Op, Rejection, SyncRequest, SyncResponse, Task};
@@ -96,6 +96,7 @@ pub fn router(app: Arc<App>) -> Router {
     let api = Router::new()
         .route("/sync", post(sync))
         .route("/lists", get(lists).post(create_list))
+        .route("/lists/{id}", delete(delete_list))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(app.clone(), auth))
         .route("/health", get(health));
@@ -384,6 +385,33 @@ async fn create_list(State(app): State<Arc<App>>, Json(body): Json<CreateList>) 
             (StatusCode::CREATED, Json(meta)).into_response()
         }
         Ok(Err(e @ (StoreError::Exists(_) | StoreError::InvalidId(_)))) => {
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+        }
+        Ok(Err(e)) => AppError(e.into()).into_response(),
+        Err(e) => AppError(e.into()).into_response(),
+    }
+}
+
+async fn delete_list(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+    if id.starts_with("ha:") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "las listas de Home Assistant no se pueden borrar desde acá (usá `exclude` en la config)",
+        )
+            .into_response();
+    }
+    let store = app.store.clone();
+    let id2 = id.clone();
+    let result = tokio::task::spawn_blocking(move || store.remove_list(&id2)).await;
+    match result {
+        Ok(Ok(())) => {
+            let _ = app.events.send(id);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(Err(e @ StoreError::NotFound(_))) => {
+            (StatusCode::NOT_FOUND, e.to_string()).into_response()
+        }
+        Ok(Err(e @ StoreError::InvalidId(_))) => {
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
         Ok(Err(e)) => AppError(e.into()).into_response(),

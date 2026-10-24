@@ -2,7 +2,9 @@ mod backend;
 mod config;
 mod editor;
 mod output;
+mod tui;
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Context, anyhow, bail};
@@ -124,6 +126,8 @@ enum Cmd {
     Sync,
     /// Estado de la sincronización.
     Status,
+    /// Interfaz de terminal interactiva (teclas tipo vim).
+    Tui,
     /// Levanta el servidor (API + PWA).
     Serve {
         #[arg(long)]
@@ -148,7 +152,14 @@ fn main() {
 fn run(cli: Cli) -> anyhow::Result<()> {
     let cfg = Config::load(cli.config.as_deref())?;
     let data_dir = cfg.data_dir(cli.data_dir.as_deref());
-    let cmd = cli.cmd.unwrap_or(Cmd::Lists);
+    // Sin subcomando: en una terminal abre la TUI; en un pipe, lista como antes.
+    let cmd = cli.cmd.unwrap_or_else(|| {
+        if std::io::stdout().is_terminal() {
+            Cmd::Tui
+        } else {
+            Cmd::Lists
+        }
+    });
 
     if let Cmd::Serve { bind } = cmd {
         let server = cfg.server_config(data_dir, bind)?;
@@ -156,6 +167,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     let remote = cfg.remote(cli.server.as_deref());
+    if let Cmd::Tui = cmd {
+        let backend: Box<dyn Backend + Send> = match remote {
+            Some(r) => Box::new(Remote::open(r)?),
+            None => Box::new(Local::open(data_dir)?),
+        };
+        return tui::run(backend, cfg.default_list.clone());
+    }
+
     let mut local: Option<Local> = None;
     let mut remote_backend: Option<Remote> = None;
     let backend: &mut dyn Backend = match remote {
@@ -165,7 +184,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let default_list = cfg.default_list.clone();
 
     match cmd {
-        Cmd::Serve { .. } => unreachable!(),
+        Cmd::Serve { .. } | Cmd::Tui => unreachable!(),
         Cmd::Lists => {
             let rows = backend.lists()?;
             if cli.json {

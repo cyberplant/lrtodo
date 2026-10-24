@@ -23,12 +23,32 @@ pub struct ListRow {
     pub pending: usize,
 }
 
+/// Estado de la sincronización para mostrar (barra de la TUI).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SyncState {
+    /// Modo local: no hay servidor.
+    Local,
+    Remote {
+        url: String,
+        pending: usize,
+        last_sync_ms: Option<u64>,
+        last_error: Option<String>,
+    },
+}
+
 pub trait Backend {
     fn lists(&mut self) -> anyhow::Result<Vec<ListRow>>;
     fn tasks(&mut self, list: &str) -> anyhow::Result<Vec<TaskView>>;
     fn caps(&mut self, list: &str) -> anyhow::Result<Caps>;
     fn add(&mut self, list: &str, task: Task) -> anyhow::Result<TaskId>;
     fn set(&mut self, list: &str, id: &str, change: Change) -> anyhow::Result<()>;
+    /// Varios cambios a la misma tarea (la TUI los manda juntos).
+    fn set_many(&mut self, list: &str, id: &str, changes: Vec<Change>) -> anyhow::Result<()> {
+        for change in changes {
+            self.set(list, id, change)?;
+        }
+        Ok(())
+    }
     fn delete(&mut self, list: &str, id: &str) -> anyhow::Result<()>;
     fn move_task(&mut self, from: &str, id: &str, to: &str) -> anyhow::Result<TaskId> {
         let mut task = self
@@ -47,6 +67,23 @@ pub trait Backend {
     fn create_list(&mut self, id: &str, name: Option<&str>, layout: Layout) -> anyhow::Result<()>;
     /// Sincroniza (remoto). Devuelve un mensaje de estado para mostrar, si hay.
     fn sync(&mut self) -> anyhow::Result<Option<String>>;
+    /// Pull incondicional (la TUI lo llama periódicamente y ante eventos).
+    /// Por defecto es lo mismo que `sync`.
+    fn poll(&mut self) -> anyhow::Result<Option<String>> {
+        self.sync()
+    }
+    /// Estado actual para la barra de estado.
+    fn sync_state(&self) -> SyncState {
+        SyncState::Local
+    }
+    /// `(url, token)` si es un backend remoto (para el hilo de eventos SSE).
+    fn remote_info(&self) -> Option<(String, Option<String>)> {
+        None
+    }
+    /// Directorio de datos si es un backend local (para el watcher de archivos).
+    fn local_root(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------- local
@@ -185,6 +222,10 @@ impl Backend for Local {
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {
         Ok(None)
+    }
+
+    fn local_root(&self) -> Option<PathBuf> {
+        Some(self.store.root().to_path_buf())
     }
 }
 
@@ -386,13 +427,7 @@ impl Backend for Remote {
             _ if self.replica.pending() > 0 || !self.synced => self.try_sync(),
             _ => Ok(()),
         };
-        self.save()?;
-        let mut msgs: Vec<String> = self
-            .replica
-            .notices
-            .drain(..)
-            .map(|n| format!("{}: {}", n.list, n.message))
-            .collect();
+        let mut msgs = self.take_notices()?;
         if let Err(e) = result {
             msgs.push(format!(
                 "sin conexión con {} ({e}); {} cambio(s) pendiente(s), se enviarán en la próxima sync",
@@ -404,6 +439,40 @@ impl Backend for Remote {
         }
         self.save()?;
         Ok((!msgs.is_empty()).then(|| msgs.join("\n")))
+    }
+
+    fn poll(&mut self) -> anyhow::Result<Option<String>> {
+        // A diferencia de `sync`, siempre intenta (la TUI regula la frecuencia);
+        // el error de conexión queda en `last_error` para la barra de estado.
+        let _ = self.try_sync();
+        let msgs = self.take_notices()?;
+        self.save()?;
+        Ok((!msgs.is_empty()).then(|| msgs.join("\n")))
+    }
+
+    fn sync_state(&self) -> SyncState {
+        SyncState::Remote {
+            url: self.cfg.url.clone(),
+            pending: self.replica.pending(),
+            last_sync_ms: self.replica.last_sync_ms,
+            last_error: self.replica.last_error.clone(),
+        }
+    }
+
+    fn remote_info(&self) -> Option<(String, Option<String>)> {
+        Some((self.cfg.url.clone(), self.cfg.token.clone()))
+    }
+}
+
+impl Remote {
+    fn take_notices(&mut self) -> anyhow::Result<Vec<String>> {
+        self.save()?;
+        Ok(self
+            .replica
+            .notices
+            .drain(..)
+            .map(|n| format!("{}: {}", n.list, n.message))
+            .collect())
     }
 }
 

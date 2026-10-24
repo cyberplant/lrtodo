@@ -1,8 +1,8 @@
 # lrtodo
 
 Gestor de tareas **offline-first**, con los datos en **YAML editable a mano**,
-interfaz **CLI**, **web instalable en el celular (PWA)** y acceso a las listas
-`todo` de **Home Assistant**.
+interfaz **CLI**, **TUI** (terminal interactiva), **web instalable en el celular
+(PWA)** y acceso a las listas `todo` de **Home Assistant**.
 
 - La app del celular siempre muestra y deja editar lo que tiene en cache, aunque
   no haya señal o la red esté lenta. Los cambios se envían en segundo plano, y
@@ -24,11 +24,26 @@ lrtodo add compras huevos --due 2026-10-25 -n "docena"
 lrtodo ls compras
 lrtodo done compras 1                    # número, prefijo de id o título
 lrtodo edit compras                      # abre $EDITOR; se aplica como merge
+lrtodo                                   # en una terminal abre la TUI
 lrtodo serve                             # API + PWA en http://0.0.0.0:8765
 ```
 
 Comandos: `lists`, `ls`, `add`, `done`, `undo`, `rm`, `set`, `mv`, `edit`, `new`,
-`convert`, `check`, `sync`, `status` y `serve`. Con `--json` la salida es JSON.
+`convert`, `check`, `sync`, `status`, `tui` y `serve`. Con `--json` la salida es
+JSON. `lrtodo` a secas abre la TUI si está en una terminal (en un pipe, lista).
+
+### TUI
+
+`lrtodo tui` usa el mismo backend que la CLI (local o `--server`): en modo local
+vigila los archivos y en modo remoto escucha los eventos del servidor, así que
+los cambios de otros clientes aparecen solos. Funciona offline igual que la PWA:
+la barra de abajo muestra "al día", "sincronizando…", "sin conexión" y los
+cambios pendientes.
+
+Teclas: `j`/`k` moverse, `tab`/`h`/`l` cambiar de panel, `espacio`/`enter`
+tildar, `a` agregar, `e` editar (formulario), `d` borrar, `m` mover, `n` crear
+lista (`id|nombre`), `/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista
+en `$EDITOR`, `r` sincronizar, `?` ayuda, `q` salir.
 
 ## Configuración (`~/.config/lrtodo/config.yaml`)
 

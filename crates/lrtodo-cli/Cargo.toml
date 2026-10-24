@@ -12,10 +12,13 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 dirs.workspace = true
 lrtodo-core.workspace = true
 lrtodo-server.workspace = true
 lrtodo-store.workspace = true
+notify.workspace = true
+ratatui.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

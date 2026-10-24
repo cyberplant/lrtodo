@@ -14,7 +14,10 @@ core compilado a WASM.
 - `crates/lrtodo-ha`: cliente REST de HA y reconciliación (`HaList`).
 - `crates/lrtodo-server`: axum (`/api/sync`, `/api/lists`, `/api/events` SSE,
   `/api/health`), hub de HA, watcher y PWA embebida (`web/dist` vía rust-embed).
-- `crates/lrtodo-cli`: binario `lrtodo` (local, remoto con cache, `serve`).
+- `crates/lrtodo-cli`: binario `lrtodo` (local, remoto con cache, `serve`, `tui`).
+  La TUI (`src/tui/`): la UI corre en el hilo principal y el backend en un hilo
+  worker (`worker.rs`); se comunican con `ChanBackend`, que implementa `Backend`
+  vía canales. Refresco en vivo: SSE `/api/events` en remoto, `notify` en local.
 - `crates/lrtodo-wasm`: binding wasm-bindgen de `Replica` (JSON in/out).
 - `web/`: PWA. `src/lib/app.svelte.ts` tiene el estado y el motor de sync.
 - `ha-addon/lrtodo/`, `repository.yaml` y `Dockerfile`: add-on de HA / imagen.

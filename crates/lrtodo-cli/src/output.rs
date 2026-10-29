@@ -85,13 +85,35 @@ pub fn lists(rows: &[ListRow]) {
     }
 }
 
-/// Profundidad de subtarea: cuántos padres tiene encima (máx 4, seguro ante ciclos).
-fn depth_of(tasks: &[TaskView], id: &str) -> usize {
-    let mut depth = 0;
-    let mut cur = id.to_string();
+/// Mapa padre → hijos (ids, en orden), sólo links `subtask` resolubles acá.
+fn children_map(tasks: &[TaskView]) -> std::collections::BTreeMap<String, Vec<String>> {
     let ids: std::collections::BTreeSet<&str> = tasks.iter().map(|t| t.task.id.as_str()).collect();
+    let mut map: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for t in tasks {
+        if let Some(l) = t
+            .task
+            .links
+            .iter()
+            .find(|l| l.kind == lrtodo_core::LinkKind::Subtask && ids.contains(l.to.as_str()))
+        {
+            map.entry(l.to.clone()).or_default().push(t.task.id.clone());
+        }
+    }
+    map
+}
+
+/// Guías del árbol: `[propio es-último, padre es-último, abuelo es-último…]`
+/// para dibujar `├─`/`└─` y las verticales `│`. Vacío = raíz.
+fn tree_guides(
+    tasks: &[TaskView],
+    children: &std::collections::BTreeMap<String, Vec<String>>,
+    id: &str,
+) -> Vec<bool> {
+    let mut guides = vec![];
+    let mut cur = id.to_string();
     let mut seen = std::collections::BTreeSet::new();
-    while depth < 4 {
+    while guides.len() < 4 {
         let parent = tasks
             .iter()
             .find(|t| t.task.id == cur)
@@ -102,15 +124,30 @@ fn depth_of(tasks: &[TaskView], id: &str) -> usize {
                     .find(|l| l.kind == lrtodo_core::LinkKind::Subtask && !l.to.contains('/'))
             })
             .map(|l| l.to.clone());
-        match parent {
-            Some(p) if ids.contains(p.as_str()) && seen.insert(p.clone()) => {
-                depth += 1;
-                cur = p;
-            }
-            _ => break,
+        let Some(p) = parent else { break };
+        if !children.contains_key(&p) || !seen.insert(p.clone()) {
+            break;
         }
+        guides.push(children[&p].last() == Some(&cur));
+        cur = p;
     }
-    depth
+    guides
+}
+
+/// Prefijo visual del árbol: `│   ` por ancestros no-últimos y `├─`/`└─`.
+fn tree_prefix(guides: &[bool]) -> String {
+    let mut s = String::new();
+    for i in (1..guides.len()).rev() {
+        s.push_str(if guides[i] { "    " } else { "│   " });
+    }
+    if !guides.is_empty() {
+        s.push_str(if guides[0] {
+            "└── "
+        } else {
+            "├── "
+        });
+    }
+    s
 }
 
 pub fn tasks(name: &str, tasks: &[TaskView], only_open: bool) {
@@ -122,14 +159,15 @@ pub fn tasks(name: &str, tasks: &[TaskView], only_open: bool) {
         st.dim(&format!("({open} abiertas de {})", tasks.len()))
     );
     let width = tasks.len().to_string().len();
+    let children = children_map(tasks);
     for (i, tv) in tasks.iter().enumerate() {
         let t = &tv.task;
         if only_open && t.done {
             continue;
         }
         let check = if t.done { "[x]" } else { "[ ]" };
-        let indent = "  ".repeat(depth_of(tasks, &t.id));
-        let mut line = format!("{:>width$} {check} {indent}", i + 1);
+        let prefix = tree_prefix(&tree_guides(tasks, &children, &t.id));
+        let mut line = format!("{:>width$} {check} {prefix}", i + 1);
         if tv.blocked && !t.done {
             line.push_str(&st.red("⊘ "));
         }

@@ -82,16 +82,71 @@ impl ListDoc {
         }
     }
 
-    /// Las tareas con `links` proyectados desde `edges` (para vistas y YAML).
+    /// Las tareas con `links` proyectados desde `edges` (para vistas y YAML),
+    /// en orden de árbol: cada hijo va inmediatamente después de su padre.
+    /// El orden entre raíces y entre hermanos es el del doc.
     pub fn tasks_with_links(&self) -> Vec<Task> {
-        self.tasks
-            .iter()
+        self.tree_order()
+            .into_iter()
             .cloned()
             .map(|mut t| {
                 t.links = self.links_of(&t.id);
                 t
             })
             .collect()
+    }
+
+    /// Orden de árbol (DFS): raíces en orden del doc, cada una seguida de sus
+    /// subtareas. Seguro ante ciclos (`seen`) y links a otras listas.
+    fn tree_order(&self) -> Vec<&Task> {
+        let ids: BTreeSet<&str> = self.tasks.iter().map(|t| t.id.as_str()).collect();
+        let mut children: BTreeMap<&str, Vec<&Task>> = BTreeMap::new();
+        let mut roots: Vec<&Task> = Vec::new();
+        for t in &self.tasks {
+            match self
+                .parent_of(&t.id)
+                .filter(|p| ids.contains(p.as_str()) && p != &t.id)
+            {
+                Some(p) => {
+                    let p: &str = self
+                        .tasks
+                        .iter()
+                        .find(|x| x.id == p)
+                        .map(|x| x.id.as_str())
+                        .unwrap();
+                    children.entry(p).or_default().push(t);
+                }
+                None => roots.push(t),
+            }
+        }
+        let mut out = Vec::with_capacity(self.tasks.len());
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        fn emit<'a>(
+            t: &'a Task,
+            children: &BTreeMap<&'a str, Vec<&'a Task>>,
+            seen: &mut BTreeSet<&'a str>,
+            out: &mut Vec<&'a Task>,
+        ) {
+            if !seen.insert(t.id.as_str()) {
+                return;
+            }
+            out.push(t);
+            if let Some(kids) = children.get(t.id.as_str()) {
+                for k in kids {
+                    emit(k, children, seen, out);
+                }
+            }
+        }
+        for t in roots {
+            emit(t, &children, &mut seen, &mut out);
+        }
+        // Lo que quedó fuera (ciclo desconectado del árbol), al final.
+        for t in &self.tasks {
+            if seen.insert(t.id.as_str()) {
+                out.push(t);
+            }
+        }
+        out
     }
 
     /// Aristas que salen de `src`, ordenadas por (kind, destino).

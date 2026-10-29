@@ -283,13 +283,37 @@ impl App {
             .map(|t| (t.task.id.clone(), t.task.done))
     }
 
-    /// Profundidad de subtarea: cuántos padres tiene encima (máx 4, seguro
-    /// ante ciclos). Sólo cuentan links `subtask` a tareas de esta lista.
-    pub fn depth_of(&self, id: &str) -> usize {
-        let mut depth = 0;
+    /// Mapa padre → hijos (ids, en orden), sólo links `subtask` resolubles
+    /// en esta lista.
+    pub fn children_map(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        let ids: std::collections::BTreeSet<&str> =
+            self.tasks.iter().map(|t| t.task.id.as_str()).collect();
+        let mut map: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for t in &self.tasks {
+            if let Some(l) = t
+                .task
+                .links
+                .iter()
+                .find(|l| l.kind == LinkKind::Subtask && ids.contains(l.to.as_str()))
+            {
+                map.entry(l.to.clone()).or_default().push(t.task.id.clone());
+            }
+        }
+        map
+    }
+
+    /// Guías del árbol para dibujar `├─`/`└─`/`│`:
+    /// `[propio es-último, padre es-último, abuelo es-último…]`. Vacío = raíz.
+    pub fn tree_guides(
+        &self,
+        children: &std::collections::BTreeMap<String, Vec<String>>,
+        id: &str,
+    ) -> Vec<bool> {
+        let mut guides = vec![];
         let mut cur = id.to_string();
         let mut seen = std::collections::BTreeSet::new();
-        while depth < 4 {
+        while guides.len() < 4 {
             let parent = self
                 .tasks
                 .iter()
@@ -301,15 +325,14 @@ impl App {
                         .find(|l| l.kind == LinkKind::Subtask && !l.to.contains('/'))
                 })
                 .map(|l| l.to.clone());
-            match parent {
-                Some(p) if self.tasks.iter().any(|t| t.task.id == p) && seen.insert(p.clone()) => {
-                    depth += 1;
-                    cur = p;
-                }
-                _ => break,
+            let Some(p) = parent else { break };
+            if !children.contains_key(&p) || !seen.insert(p.clone()) {
+                break;
             }
+            guides.push(children[&p].last() == Some(&cur));
+            cur = p;
         }
-        depth
+        guides
     }
 
     fn clamp_sel(&mut self) {

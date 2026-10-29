@@ -114,9 +114,10 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
     if !app.show_done {
         title.push_str("· hechas ocultas ");
     }
+    let children = app.children_map();
     let items: Vec<ListItem> = visible
         .iter()
-        .map(|tv| ListItem::new(task_line(tv, app.depth_of(&tv.task.id))))
+        .map(|tv| ListItem::new(task_line(tv, &app.tree_guides(&children, &tv.task.id))))
         .collect();
     let list = List::new(items)
         .block(
@@ -133,7 +134,7 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn task_line(tv: &TaskView, depth: usize) -> Line<'static> {
+fn task_line(tv: &TaskView, guides: &[bool]) -> Line<'static> {
     let t = &tv.task;
     let check = if t.done { "[x] " } else { "[ ] " };
     let title_style = if t.done {
@@ -145,8 +146,16 @@ fn task_line(tv: &TaskView, depth: usize) -> Line<'static> {
     } else {
         Style::default()
     };
+    // Árbol: `│  ` por ancestros no-últimos y `├─`/`└─` en el propio nivel.
+    let mut tree = String::new();
+    for i in (1..guides.len()).rev() {
+        tree.push_str(if guides[i] { "   " } else { "│  " });
+    }
+    if !guides.is_empty() {
+        tree.push_str(if guides[0] { "└─ " } else { "├─ " });
+    }
     let mut spans = vec![
-        Span::raw("  ".repeat(depth)),
+        Span::styled(tree, Style::default().fg(Color::DarkGray)),
         Span::styled(check, Style::default().fg(if t.done { OK } else { ACCENT })),
     ];
     if tv.blocked && !t.done {

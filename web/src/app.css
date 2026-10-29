@@ -323,6 +323,15 @@ nav.top h1 {
   color: var(--muted);
 }
 
+.task.blocked .title {
+  opacity: 0.55;
+}
+
+.blocked-mark {
+  color: var(--err);
+  margin-right: 0.35rem;
+}
+
 .meta {
   font-size: 0.8rem;
   color: var(--muted);

@@ -61,9 +61,10 @@ la barra de abajo muestra "al día", "sincronizando…", "sin conexión" y los
 cambios pendientes.
 
 Teclas: `j`/`k` moverse, `tab`/`h`/`l` cambiar de panel, `espacio`/`enter`
-tildar, `a` agregar, `e` editar (formulario), `d` borrar tarea, `m` mover, `n`
-crear lista (`id|nombre`), `D` borrar la lista entera (pide tipear el id para
-confirmar), `/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista en
+tildar, `a` agregar, `e` editar (formulario), `d` borrar tarea, `m` mover, `L`
+linkear (elegí kind → destino), `U` quitar un link, `n` crear lista
+(`id|nombre`), `D` borrar la lista entera (pide tipear el id para confirmar),
+`/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista en
 `$EDITOR`, `r` sincronizar, `?` ayuda, `q` salir.
 
 ## Configuración (`~/.config/lrtodo/config.yaml`)

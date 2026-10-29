@@ -9,6 +9,22 @@
   const open = $derived(tasks.filter((t) => !t.done));
   const done = $derived(tasks.filter((t) => t.done));
 
+  // Profundidad de subtarea (cuántos padres tiene encima; segura ante ciclos).
+  const ids = $derived(new Set(tasks.map((t) => t.id)));
+  function depthOf(t: (typeof tasks)[number]): number {
+    let depth = 0;
+    let cur = t;
+    const seen = new Set<string>();
+    while (depth < 4) {
+      const parent = (cur.links ?? []).find((l) => l.kind === 'subtask' && !l.to.includes('/'))?.to;
+      if (!parent || !ids.has(parent) || seen.has(parent)) break;
+      seen.add(parent);
+      cur = tasks.find((x) => x.id === parent)!;
+      depth += 1;
+    }
+    return depth;
+  }
+
   let title = $state('');
   let showDone = $state(false);
   let input: HTMLInputElement | undefined = $state();
@@ -56,7 +72,7 @@
 
   <ul class="tasks" data-testid="open-tasks">
     {#each open as t (t.id)}
-      <TaskRow task={t} list={list} />
+      <TaskRow task={t} list={list} depth={depthOf(t)} tasks={tasks} />
     {/each}
   </ul>
   {#if !open.length}
@@ -75,7 +91,7 @@
     {#if showDone}
       <ul class="tasks done">
         {#each done as t (t.id)}
-          <TaskRow task={t} list={list} />
+          <TaskRow task={t} list={list} depth={depthOf(t)} tasks={tasks} />
         {/each}
       </ul>
     {/if}

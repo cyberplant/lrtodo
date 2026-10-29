@@ -10,6 +10,15 @@ fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
 
+fn link_kind(s: &str) -> Result<lrtodo_core::LinkKind, JsError> {
+    match s {
+        "subtask" => Ok(lrtodo_core::LinkKind::Subtask),
+        "blocks" => Ok(lrtodo_core::LinkKind::Blocks),
+        "related" => Ok(lrtodo_core::LinkKind::Related),
+        other => Err(JsError::new(&format!("kind inválido: {other}"))),
+    }
+}
+
 fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).expect("serializable")
 }
@@ -92,6 +101,34 @@ impl WasmReplica {
         now: f64,
     ) -> Result<String, JsError> {
         self.inner.move_task(from, id, to, now as u64).map_err(err)
+    }
+
+    /// Arista `src → dst` (`dst` puede ser `otra-lista/id`).
+    /// `kind`: "subtask" | "blocks" | "related".
+    pub fn link(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: &str,
+        now: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .link(list, src, dst, link_kind(kind)?, now as u64)
+            .map_err(err)
+    }
+
+    pub fn unlink(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: &str,
+        now: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .unlink(list, src, dst, link_kind(kind)?, now as u64)
+            .map_err(err)
     }
 
     #[wasm_bindgen(js_name = syncRequest)]

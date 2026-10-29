@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use super::app::{App, Focus, InputKind, Mode};
 use crate::backend::SyncState;
 use crate::output::ago;
-use lrtodo_core::{ListKind, TaskView};
+use lrtodo_core::{LinkKind, ListKind, TaskView};
 use lrtodo_store::now_ms;
 
 const ACCENT: Color = Color::Cyan;
@@ -49,7 +49,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::Input { .. } => draw_input(f, app, area),
         Mode::Form { .. } => draw_form(f, app, area),
         Mode::Confirm { .. } => draw_confirm(f, app, area),
-        Mode::PickList { .. } => draw_pick(f, app, area),
+        Mode::Pick { .. } => draw_pick(f, app, area),
         Mode::Help => draw_help(f, area),
         Mode::Normal => {}
     }
@@ -116,7 +116,7 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
     }
     let items: Vec<ListItem> = visible
         .iter()
-        .map(|tv| ListItem::new(task_line(tv)))
+        .map(|tv| ListItem::new(task_line(tv, app.depth_of(&tv.task.id))))
         .collect();
     let list = List::new(items)
         .block(
@@ -133,20 +133,26 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn task_line(tv: &TaskView) -> Line<'static> {
+fn task_line(tv: &TaskView, depth: usize) -> Line<'static> {
     let t = &tv.task;
     let check = if t.done { "[x] " } else { "[ ] " };
     let title_style = if t.done {
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::CROSSED_OUT)
+    } else if tv.blocked {
+        Style::default().fg(Color::DarkGray)
     } else {
         Style::default()
     };
     let mut spans = vec![
+        Span::raw("  ".repeat(depth)),
         Span::styled(check, Style::default().fg(if t.done { OK } else { ACCENT })),
-        Span::styled(t.title.clone(), title_style),
     ];
+    if tv.blocked && !t.done {
+        spans.push(Span::styled("⊘ ", Style::default().fg(ERR)));
+    }
+    spans.push(Span::styled(t.title.clone(), title_style));
     if let Some(p) = t.priority {
         spans.push(Span::styled(format!(" !{p}"), Style::default().fg(WARN)));
     }
@@ -167,6 +173,19 @@ fn task_line(tv: &TaskView) -> Line<'static> {
             format!(" · {first}"),
             Style::default().fg(Color::DarkGray),
         ));
+    }
+    for l in &t.links {
+        if l.kind != LinkKind::Subtask {
+            let kind = if l.kind == LinkKind::Blocks {
+                "bloquea"
+            } else {
+                "~"
+            };
+            spans.push(Span::styled(
+                format!(" {kind}:{}", l.to),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
     }
     if tv.pending {
         spans.push(Span::styled(" ●", Style::default().fg(WARN)));
@@ -240,13 +259,13 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
                 " j/k lista · enter ir a tareas · n nueva · D borrar · ? ayuda · q salir"
             }
             Focus::Tasks => {
-                " espacio tildar · a agregar · e editar · d borrar · m mover · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"
+                " espacio tildar · a agregar · e editar · d borrar · m mover · L link · U unlink · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"
             }
         },
         Mode::Input { .. } => " enter aceptar · esc cancelar",
         Mode::Form { .. } => " tab/↑/↓ campo · enter guardar · esc cancelar",
         Mode::Confirm { .. } => " s confirmar · cualquier otra tecla cancela",
-        Mode::PickList { .. } => " j/k elegir · enter mover · esc cancelar",
+        Mode::Pick { .. } => " j/k elegir · enter aceptar · esc cancelar",
         Mode::Help => " cualquier tecla para volver",
     };
     f.render_widget(
@@ -356,26 +375,30 @@ fn draw_confirm(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_pick(f: &mut Frame, app: &mut App, area: Rect) {
-    let Mode::PickList { sel, .. } = &app.mode else {
+    let Mode::Pick {
+        title,
+        options,
+        sel,
+        ..
+    } = &app.mode
+    else {
         return;
     };
-    let h = (app.lists.len() as u16 + 2).min(14);
-    let rect = centered(area, 40, h);
-    f.render_widget(Clear, rect);
-    let current = app.current_list_id();
-    let items: Vec<ListItem> = app
-        .lists
+    let w = (options
         .iter()
-        .map(|r| {
-            let here = current.as_ref() == Some(&r.info.meta.id);
-            ListItem::new(Line::from(vec![
-                Span::raw(if here { "→ " } else { "  " }),
-                Span::raw(&r.info.meta.name),
-            ]))
-        })
+        .map(|o| o.chars().count())
+        .max()
+        .unwrap_or(10) as u16
+        + 6)
+    .clamp(4, area.width.saturating_sub(2).max(4));
+    let rect = centered(area, w, (options.len() as u16 + 2).min(14));
+    f.render_widget(Clear, rect);
+    let items: Vec<ListItem> = options
+        .iter()
+        .map(|o| ListItem::new(Line::from(Span::raw(o.clone()))))
         .collect();
     let list = List::new(items)
-        .block(popup("Mover a…"))
+        .block(popup(title))
         .highlight_style(sel_style());
     let mut state = ListState::default();
     state.select(Some(*sel));

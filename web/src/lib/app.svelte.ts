@@ -23,6 +23,8 @@ export type ListView = {
   synced_ms?: number;
 };
 
+export type TaskLink = { to: string; kind: 'subtask' | 'blocks' | 'related' };
+
 export type Task = {
   id: string;
   title: string;
@@ -35,6 +37,8 @@ export type Task = {
   updated?: string;
   completed?: string;
   pending: boolean;
+  links?: TaskLink[];
+  blocked?: boolean;
 };
 
 export type Field = 'title' | 'done' | 'due' | 'notes' | 'tags' | 'priority';
@@ -171,6 +175,14 @@ class AppState {
 
   move(from: string, id: string, to: string) {
     return this.mutate((r) => r.moveTask(from, id, to, Date.now()));
+  }
+
+  link(list: string, src: string, dst: string, kind: TaskLink['kind']) {
+    return this.mutate((r) => r.link(list, src, dst, kind, Date.now()));
+  }
+
+  unlink(list: string, src: string, dst: string, kind: TaskLink['kind']) {
+    return this.mutate((r) => r.unlink(list, src, dst, kind, Date.now()));
   }
 
   clearNotices() {

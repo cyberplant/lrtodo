@@ -4,10 +4,18 @@
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use lrtodo_core::{Change, Task, TaskView};
+use lrtodo_core::{Change, LinkKind, Task, TaskView};
 
 use super::worker::{ChanBackend, Msg};
 use crate::backend::{Backend, ListRow, SyncState};
+
+fn kind_label(k: LinkKind) -> &'static str {
+    match k {
+        LinkKind::Subtask => "subtarea",
+        LinkKind::Blocks => "bloquea",
+        LinkKind::Related => "relacionada",
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -33,12 +41,33 @@ pub enum Mode {
         text: String,
         id: String,
     },
-    /// Elegir lista destino para mover la tarea.
-    PickList {
-        id: String,
+    /// Elegir entre opciones (mover a lista, kind/destino de link, unlink).
+    Pick {
+        title: String,
+        options: Vec<String>,
         sel: usize,
+        next: PickNext,
     },
     Help,
+}
+
+/// Qué hacer al elegir una opción del picker.
+pub enum PickNext {
+    /// Mover la tarea `id` a la lista elegida (options = ids).
+    MoveTask { id: String },
+    /// Elegir el kind del link de `src` (options = descripciones).
+    LinkKind { src: String },
+    /// Elegir destino (options = títulos; `dsts` son los ids paralelos).
+    LinkDst {
+        src: String,
+        kind: LinkKind,
+        dsts: Vec<String>,
+    },
+    /// Elegir qué link quitar (options = descripciones; `dsts` paralelo).
+    Unlink {
+        src: String,
+        dsts: Vec<(String, LinkKind)>,
+    },
 }
 
 #[derive(Clone)]
@@ -254,6 +283,35 @@ impl App {
             .map(|t| (t.task.id.clone(), t.task.done))
     }
 
+    /// Profundidad de subtarea: cuántos padres tiene encima (máx 4, seguro
+    /// ante ciclos). Sólo cuentan links `subtask` a tareas de esta lista.
+    pub fn depth_of(&self, id: &str) -> usize {
+        let mut depth = 0;
+        let mut cur = id.to_string();
+        let mut seen = std::collections::BTreeSet::new();
+        while depth < 4 {
+            let parent = self
+                .tasks
+                .iter()
+                .find(|t| t.task.id == cur)
+                .and_then(|t| {
+                    t.task
+                        .links
+                        .iter()
+                        .find(|l| l.kind == LinkKind::Subtask && !l.to.contains('/'))
+                })
+                .map(|l| l.to.clone());
+            match parent {
+                Some(p) if self.tasks.iter().any(|t| t.task.id == p) && seen.insert(p.clone()) => {
+                    depth += 1;
+                    cur = p;
+                }
+                _ => break,
+            }
+        }
+        depth
+    }
+
     fn clamp_sel(&mut self) {
         self.sel_list = self.sel_list.min(self.lists.len().saturating_sub(1));
         self.sel_task = self.sel_task.min(self.visible().len().saturating_sub(1));
@@ -303,7 +361,7 @@ impl App {
             Mode::Input { .. } => self.key_input(key),
             Mode::Form { .. } => self.key_form(key),
             Mode::Confirm { .. } => self.key_confirm(key),
-            Mode::PickList { .. } => self.key_pick(key),
+            Mode::Pick { .. } => self.key_pick(key),
             Mode::Help => self.mode = Mode::Normal,
         }
     }
@@ -375,6 +433,8 @@ impl App {
             KeyCode::Char('e') if self.focus == Focus::Tasks => self.open_form(),
             KeyCode::Char('d') if self.focus == Focus::Tasks => self.ask_delete(),
             KeyCode::Char('m') if self.focus == Focus::Tasks => self.open_picker(),
+            KeyCode::Char('L') if self.focus == Focus::Tasks => self.link_start(),
+            KeyCode::Char('U') if self.focus == Focus::Tasks => self.unlink_start(),
             KeyCode::Char('E') => {
                 if let Some(list) = self.current_list_id() {
                     self.effect = Some(Effect::Edit { list });
@@ -645,28 +705,124 @@ impl App {
             self.flash = Some(("no hay otra lista".into(), Instant::now()));
             return;
         }
-        self.mode = Mode::PickList {
-            id,
+        let title = self
+            .visible()
+            .get(self.sel_task)
+            .map(|t| t.task.title.clone())
+            .unwrap_or_default();
+        self.mode = Mode::Pick {
+            title: format!("mover «{title}» a:"),
+            options: self
+                .lists
+                .iter()
+                .map(|r| r.info.meta.name.clone())
+                .collect(),
             sel: self.sel_list,
+            next: PickNext::MoveTask { id },
         };
     }
 
-    fn key_pick(&mut self, key: KeyEvent) {
-        let Mode::PickList { id, sel } = &mut self.mode else {
+    /// `L`: linkear la tarea seleccionada — primero el kind, luego el destino.
+    fn link_start(&mut self) {
+        let v = self.visible();
+        let Some(t) = v.get(self.sel_task) else {
             return;
         };
-        let id = id.clone();
+        if v.len() < 2 {
+            self.flash = Some(("no hay otra tarea".into(), Instant::now()));
+            return;
+        }
+        self.mode = Mode::Pick {
+            title: format!("«{}» es…", t.task.title),
+            options: vec![
+                "subtarea de…".into(),
+                "bloquea a…".into(),
+                "relacionada con…".into(),
+            ],
+            sel: 0,
+            next: PickNext::LinkKind {
+                src: t.task.id.clone(),
+            },
+        };
+    }
+
+    /// `U`: quitar un link de la tarea seleccionada.
+    fn unlink_start(&mut self) {
+        let v = self.visible();
+        let Some(t) = v.get(self.sel_task) else {
+            return;
+        };
+        if t.task.links.is_empty() {
+            self.flash = Some((
+                "«{}» no tiene links".replace("{}", &t.task.title),
+                Instant::now(),
+            ));
+            return;
+        }
+        let options: Vec<String> = t
+            .task
+            .links
+            .iter()
+            .map(|l| format!("{} {}", kind_label(l.kind), self.task_label(&l.to)))
+            .collect();
+        let dsts: Vec<(String, LinkKind)> = t
+            .task
+            .links
+            .iter()
+            .map(|l| (l.to.clone(), l.kind))
+            .collect();
+        self.mode = Mode::Pick {
+            title: format!("quitar link de «{}»:", t.task.title),
+            options,
+            sel: 0,
+            next: PickNext::Unlink {
+                src: t.task.id.clone(),
+                dsts,
+            },
+        };
+    }
+
+    /// Cómo mostrar el destino de un link: título si es de esta lista.
+    fn task_label(&self, dst: &str) -> String {
+        match dst.split_once('/') {
+            Some((list, id)) => format!("{list}/{id}"),
+            None => self
+                .tasks
+                .iter()
+                .find(|t| t.task.id == dst)
+                .map(|t| t.task.title.clone())
+                .unwrap_or_else(|| dst.to_string()),
+        }
+    }
+
+    fn key_pick(&mut self, key: KeyEvent) {
+        let Mode::Pick { options, sel, .. } = &mut self.mode else {
+            return;
+        };
+        let n = options.len();
+        if n == 0 {
+            self.mode = Mode::Normal;
+            return;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
-            KeyCode::Char('j') | KeyCode::Down => {
-                *sel = (*sel + 1) % self.lists.len();
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                *sel = (*sel + self.lists.len() - 1) % self.lists.len();
-            }
+            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1) % n,
+            KeyCode::Char('k') | KeyCode::Up => *sel = (*sel + n - 1) % n,
             KeyCode::Enter => {
-                let to = self.lists.get(*sel).map(|r| r.info.meta.id.clone());
-                self.mode = Mode::Normal;
+                let Mode::Pick { next, sel, .. } = std::mem::replace(&mut self.mode, Mode::Normal)
+                else {
+                    return;
+                };
+                self.pick_enter(next, sel);
+            }
+            _ => {}
+        }
+    }
+
+    fn pick_enter(&mut self, next: PickNext, sel: usize) {
+        match next {
+            PickNext::MoveTask { id } => {
+                let to = self.lists.get(sel).map(|r| r.info.meta.id.clone());
                 let (Some(from), Some(to)) = (self.current_list_id(), to) else {
                     return;
                 };
@@ -678,7 +834,46 @@ impl App {
                     self.refresh_all();
                 }
             }
-            _ => {}
+            PickNext::LinkKind { src } => {
+                let kind = [LinkKind::Subtask, LinkKind::Blocks, LinkKind::Related][sel];
+                let dsts: Vec<String> = self
+                    .tasks
+                    .iter()
+                    .filter(|t| t.task.id != src)
+                    .map(|t| t.task.id.clone())
+                    .collect();
+                let options: Vec<String> = self
+                    .tasks
+                    .iter()
+                    .filter(|t| t.task.id != src)
+                    .map(|t| t.task.title.clone())
+                    .collect();
+                self.mode = Mode::Pick {
+                    title: format!("{} de:", kind_label(kind)),
+                    options,
+                    sel: 0,
+                    next: PickNext::LinkDst { src, kind, dsts },
+                };
+            }
+            PickNext::LinkDst { src, kind, dsts } => {
+                let (Some(list), Some(dst)) = (self.current_list_id(), dsts.get(sel)) else {
+                    return;
+                };
+                let r = self.chan.link(&list, &src, dst, kind);
+                if self.try_call("linkear", r).is_some() {
+                    self.refresh_all();
+                }
+            }
+            PickNext::Unlink { src, dsts } => {
+                let (Some(list), Some((dst, kind))) = (self.current_list_id(), dsts.get(sel))
+                else {
+                    return;
+                };
+                let r = self.chan.unlink(&list, &src, dst, *kind);
+                if self.try_call("deslinkear", r).is_some() {
+                    self.refresh_all();
+                }
+            }
         }
     }
 

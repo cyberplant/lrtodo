@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { app, type ListView, type Task } from '../lib/app.svelte';
+  import { app, type ListView, type Task, type TaskLink } from '../lib/app.svelte';
 
-  let { task, list }: { task: Task; list: ListView } = $props();
+  let { task, list, depth = 0, tasks = [] }: { task: Task; list: ListView; depth?: number; tasks?: Task[] } = $props();
 
   let editing = $state(false);
   let title = $state('');
@@ -9,9 +9,12 @@
   let notes = $state('');
   let tags = $state('');
   let moveTo = $state('');
+  let linkKind = $state<TaskLink['kind']>('subtask');
+  let linkTo = $state('');
 
   const caps = $derived(list.meta.caps);
   const others = $derived(app.lists.filter((l) => l.meta.id !== list.meta.id));
+  const linkTargets = $derived(tasks.filter((t) => t.id !== task.id));
 
   function startEdit() {
     title = task.title;
@@ -19,7 +22,21 @@
     notes = task.notes ?? '';
     tags = (task.tags ?? []).join(', ');
     moveTo = '';
+    linkKind = 'subtask';
+    linkTo = '';
     editing = true;
+  }
+
+  function linkLabel(l: TaskLink): string {
+    const kind = { subtask: 'subtarea de', blocks: 'bloquea a', related: 'relacionada con' }[l.kind];
+    const target = l.to.includes('/') ? l.to : (tasks.find((t) => t.id === l.to)?.title ?? l.to);
+    return `${kind} ${target}`;
+  }
+
+  async function addLink() {
+    if (!linkTo) return;
+    await app.link(list.meta.id, task.id, linkTo, linkKind);
+    linkTo = '';
   }
 
   async function save(e: Event) {
@@ -37,7 +54,7 @@
   }
 </script>
 
-<li class="task" class:done={task.done} class:pending={task.pending} data-testid="task">
+<li class="task" class:done={task.done} class:pending={task.pending} class:blocked={task.blocked && !task.done} style:padding-left="{depth * 1.5}rem" data-testid="task">
   <label class="check">
     <input
       type="checkbox"
@@ -46,6 +63,7 @@
     />
   </label>
   <button class="title" onclick={startEdit}>
+    {#if task.blocked && !task.done}<span class="blocked-mark" title="bloqueada por otra tarea">⊘</span>{/if}
     <span>{task.title}</span>
     {#if task.due || task.tags?.length || task.notes}
       <span class="meta">
@@ -79,6 +97,27 @@
             {#each others as o (o.meta.id)}<option value={o.meta.id}>{o.meta.name}</option>{/each}
           </select>
         </label>
+      {/if}
+      {#each task.links ?? [] as l (l.kind + l.to)}
+        <div class="row link-row">
+          <span class="muted">{linkLabel(l)}</span>
+          <span class="spacer"></span>
+          <button type="button" class="link danger" onclick={() => app.unlink(list.meta.id, task.id, l.to, l.kind)}>quitar</button>
+        </div>
+      {/each}
+      {#if linkTargets.length}
+        <div class="row">
+          <select bind:value={linkKind} aria-label="Tipo de link">
+            <option value="subtask">subtarea de…</option>
+            <option value="blocks">bloquea a…</option>
+            <option value="related">relacionada con…</option>
+          </select>
+          <select bind:value={linkTo} aria-label="Destino">
+            <option value="">—</option>
+            {#each linkTargets as t (t.id)}<option value={t.id}>{t.title}</option>{/each}
+          </select>
+          <button type="button" class="link" onclick={addLink} disabled={!linkTo}>linkear</button>
+        </div>
       {/if}
       <div class="row">
         <button type="submit">Guardar</button>

@@ -58,6 +58,24 @@ enum Cmd {
         notes: Option<String>,
         #[arg(short, long)]
         prio: Option<u8>,
+        /// La nueva tarea queda como subtarea de esta otra (número, id o título).
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    /// Crea un link entre tareas: `link <lista> <tarea> <subtask|blocks|related> <destino>`
+    /// (destino = número/id/título, u `otra-lista/tarea`).
+    Link {
+        list: String,
+        task: String,
+        kind: String,
+        dst: String,
+    },
+    /// Quita un link entre tareas.
+    Unlink {
+        list: String,
+        task: String,
+        kind: String,
+        dst: String,
     },
     /// Marca tareas como hechas (por número, prefijo de id o título).
     Done {
@@ -226,8 +244,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             tags,
             notes,
             prio,
+            parent,
         } => {
-            let task = Task {
+            let mut task = Task {
                 title: title.join(" "),
                 due,
                 tags,
@@ -235,10 +254,39 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 priority: prio,
                 ..Default::default()
             };
+            if let Some(p) = parent {
+                let parent_id = resolve_dst(backend, &list, &p)?;
+                task.links = vec![lrtodo_core::Link {
+                    to: parent_id,
+                    kind: lrtodo_core::LinkKind::Subtask,
+                }];
+            }
             let id = backend.add(&list, task)?;
             if cli.json {
                 println!("{}", serde_json::json!({"id": id}));
             }
+        }
+        Cmd::Link {
+            list,
+            task,
+            kind,
+            dst,
+        } => {
+            let kind = parse_kind(&kind)?;
+            let src = resolve(&backend.tasks(&list)?, &task)?;
+            let dst = resolve_dst(backend, &list, &dst)?;
+            backend.link(&list, &src, &dst, kind)?;
+        }
+        Cmd::Unlink {
+            list,
+            task,
+            kind,
+            dst,
+        } => {
+            let kind = parse_kind(&kind)?;
+            let src = resolve(&backend.tasks(&list)?, &task)?;
+            let dst = resolve_dst(backend, &list, &dst)?;
+            backend.unlink(&list, &src, &dst, kind)?;
         }
         Cmd::Done { list, refs } => for_each(backend, &list, &refs, |b, id| {
             b.set(&list, id, Change::Done(true))
@@ -348,6 +396,26 @@ fn for_each(
         f(backend, &id)?;
     }
     Ok(())
+}
+
+fn parse_kind(s: &str) -> anyhow::Result<lrtodo_core::LinkKind> {
+    match s {
+        "subtask" | "sub" => Ok(lrtodo_core::LinkKind::Subtask),
+        "blocks" | "block" => Ok(lrtodo_core::LinkKind::Blocks),
+        "related" | "rel" => Ok(lrtodo_core::LinkKind::Related),
+        _ => bail!("kind inválido {s:?} (subtask|blocks|related)"),
+    }
+}
+
+/// Destino de un link: `tarea` en la misma lista u `otra-lista/tarea`.
+fn resolve_dst(backend: &mut dyn Backend, list: &str, dst: &str) -> anyhow::Result<String> {
+    match dst.split_once('/') {
+        Some((other, r)) => {
+            let id = resolve(&backend.tasks(other)?, r)?;
+            Ok(format!("{other}/{id}"))
+        }
+        None => resolve(&backend.tasks(list)?, dst),
+    }
 }
 
 /// Número (1-based, como en `ls`), prefijo de id o título exacto.

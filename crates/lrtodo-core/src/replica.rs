@@ -49,6 +49,9 @@ pub struct TaskView {
     pub task: Task,
     /// Tiene cambios locales sin confirmar.
     pub pending: bool,
+    /// Hay un `blocks` desde una tarea abierta (sólo visibles dentro de esta lista).
+    #[serde(default)]
+    pub blocked: bool,
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -188,6 +191,55 @@ impl Replica {
         Ok(())
     }
 
+    /// Crea una arista `src → dst` (`dst` puede ser `otra-lista/id`).
+    pub fn link(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: crate::model::LinkKind,
+        now_ms: u64,
+    ) -> Result<(), ReplicaError> {
+        let doc = self.doc(list)?;
+        if doc.get(src).is_none() {
+            return Err(ReplicaError::UnknownTask(src.into()));
+        }
+        if src == dst {
+            return Err(ReplicaError::Unsupported);
+        }
+        self.push(
+            list,
+            OpKind::Link {
+                src: src.into(),
+                dst: dst.into(),
+                kind,
+            },
+            now_ms,
+        );
+        Ok(())
+    }
+
+    pub fn unlink(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: crate::model::LinkKind,
+        now_ms: u64,
+    ) -> Result<(), ReplicaError> {
+        self.doc(list)?;
+        self.push(
+            list,
+            OpKind::Unlink {
+                src: src.into(),
+                dst: dst.into(),
+                kind,
+            },
+            now_ms,
+        );
+        Ok(())
+    }
+
     /// Mueve una tarea a otra lista (agregar con id nuevo + borrar el original).
     pub fn move_task(
         &mut self,
@@ -217,12 +269,13 @@ impl Replica {
             .filter(|o| o.list == list)
             .map(|o| o.kind.task_id())
             .collect();
-        Ok(self
-            .doc(list)?
-            .tasks
+        let doc = self.doc(list)?;
+        Ok(doc
+            .tasks_with_links()
             .into_iter()
             .map(|task| TaskView {
                 pending: touched.contains(task.id.as_str()),
+                blocked: doc.blocked(&task.id),
                 task,
             })
             .collect())

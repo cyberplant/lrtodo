@@ -4,23 +4,51 @@ use serde::{Deserialize, Serialize};
 
 use crate::format_ms;
 use crate::hlc::{Clock, Hlc};
-use crate::model::{Caps, Field, Task, TaskId};
+use crate::model::{Caps, Field, Link, LinkKind, Task, TaskId};
 use crate::op::{Op, OpKind};
 use crate::protocol::Rejection;
 
-/// Estado autoritativo de una lista: tareas + relojes por campo + lápidas.
+/// Clave de una arista: (origen, destino, tipo). El destino puede ser
+/// `otra-lista/id`.
+pub type EdgeKey = (TaskId, String, LinkKind);
+
+/// Estado autoritativo de una lista: tareas + relojes por campo + lápidas +
+/// aristas (links entre tareas, cada una con su HLC y lápida propias).
 ///
 /// Reglas de merge (independientes del orden de llegada):
 /// - cada campo es last-writer-wins según su HLC;
 /// - un borrado es definitivo: las ediciones posteriores de esa tarea se ignoran;
-/// - agregar una tarea que ya existe equivale a setear todos sus campos.
+/// - agregar una tarea que ya existe equivale a setear todos sus campos;
+/// - una arista `subtask` reemplaza cualquier padre anterior del origen.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ListDoc {
+    /// Sin `links` proyectados: el estado canónico de las aristas es `edges`.
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub clocks: BTreeMap<TaskId, BTreeMap<Field, Hlc>>,
     #[serde(default)]
     pub tombstones: BTreeMap<TaskId, Hlc>,
+    #[serde(default, with = "edge_serde")]
+    pub edges: BTreeMap<EdgeKey, Hlc>,
+    #[serde(default, with = "edge_serde")]
+    pub edge_tombstones: BTreeMap<EdgeKey, Hlc>,
+}
+
+/// Las claves de arista son tuplas (JSON/YAML exigen strings): se
+/// serializan como lista ordenada de pares.
+mod edge_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(m: &BTreeMap<EdgeKey, Hlc>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(m.iter())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<BTreeMap<EdgeKey, Hlc>, D::Error> {
+        Ok(Vec::<(EdgeKey, Hlc)>::deserialize(d)?.into_iter().collect())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,11 +60,68 @@ pub enum Outcome {
 }
 
 impl ListDoc {
+    /// Construye un doc a partir de tareas que pueden traer `links` (p.ej.
+    /// snapshots de un servidor o archivos YAML): las aristas se reconstruyen
+    /// con un HLC mínimo — para vistas, donde el tiempo no importa.
     pub fn from_tasks(tasks: Vec<Task>) -> Self {
+        let epoch = Hlc::new(0, 0, "");
+        let mut edges = BTreeMap::new();
+        let tasks: Vec<Task> = tasks
+            .into_iter()
+            .map(|mut t| {
+                for l in std::mem::take(&mut t.links) {
+                    edges.insert((t.id.clone(), l.to, l.kind), epoch.clone());
+                }
+                t
+            })
+            .collect();
         Self {
             tasks,
+            edges,
             ..Default::default()
         }
+    }
+
+    /// Las tareas con `links` proyectados desde `edges` (para vistas y YAML).
+    pub fn tasks_with_links(&self) -> Vec<Task> {
+        self.tasks
+            .iter()
+            .cloned()
+            .map(|mut t| {
+                t.links = self.links_of(&t.id);
+                t
+            })
+            .collect()
+    }
+
+    /// Aristas que salen de `src`, ordenadas por (kind, destino).
+    pub fn links_of(&self, src: &str) -> Vec<Link> {
+        let mut links: Vec<Link> = self
+            .edges
+            .keys()
+            .filter(|(s, _, _)| s == src)
+            .map(|(_, dst, kind)| Link {
+                to: dst.clone(),
+                kind: *kind,
+            })
+            .collect();
+        links.sort_by(|a, b| (a.kind, &a.to).cmp(&(b.kind, &b.to)));
+        links
+    }
+
+    /// Padre de `id` si es subtarea (dst sin `/` se resuelve en esta lista).
+    pub fn parent_of(&self, id: &str) -> Option<String> {
+        self.edges
+            .keys()
+            .find(|(s, _, k)| s == id && *k == LinkKind::Subtask)
+            .map(|(_, dst, _)| dst.clone())
+    }
+
+    /// `id` está bloqueada: algún `blocks` desde una tarea abierta de esta lista.
+    pub fn blocked(&self, id: &str) -> bool {
+        self.edges.iter().any(|((s, dst, k), _)| {
+            *k == LinkKind::Blocks && dst == id && self.get(s).is_some_and(|t| !t.done)
+        })
     }
 
     pub fn get(&self, id: &str) -> Option<&Task> {
@@ -53,12 +138,16 @@ impl ListDoc {
             .values()
             .flat_map(|m| m.values())
             .chain(self.tombstones.values())
+            .chain(self.edges.values())
+            .chain(self.edge_tombstones.values())
             .max()
     }
 
     /// Revisión opaca del contenido visible (FNV-1a 64 sobre JSON canónico).
+    /// Incluye las aristas (vía `links` proyectados) para que un cambio de
+    /// link también dispare sync.
     pub fn rev(&self) -> String {
-        rev_of(&self.tasks)
+        rev_of(&self.tasks_with_links())
     }
 
     pub fn apply(&mut self, op: &Op, caps: &Caps) -> Outcome {
@@ -96,6 +185,7 @@ impl ListDoc {
                     *tomb = op.hlc.clone();
                 }
                 self.clocks.remove(id);
+                self.kill_edges(id, &op.hlc);
                 match self.index(id) {
                     Some(i) => {
                         self.tasks.remove(i);
@@ -104,6 +194,99 @@ impl ListDoc {
                     None => Outcome::Ignored,
                 }
             }
+            OpKind::Link { src, dst, kind } => {
+                if self.tombstones.contains_key(src) {
+                    return Outcome::Ignored;
+                }
+                if self.get(src).is_none() {
+                    return Outcome::Rejected("la tarea no existe".into());
+                }
+                if src == dst {
+                    return Outcome::Rejected("una tarea no se puede linkear a sí misma".into());
+                }
+                // Destino en esta misma lista (sin '/'): tiene que existir.
+                if !dst.contains('/') && self.get(dst).is_none() {
+                    return Outcome::Rejected("la tarea destino no existe".into());
+                }
+                if *kind == LinkKind::Subtask && self.reaches(src, dst) {
+                    return Outcome::Rejected("crearía un ciclo de subtareas".into());
+                }
+                self.add_edge(src, dst, *kind, &op.hlc)
+            }
+            OpKind::Unlink { src, dst, kind } => self.remove_edge(src, dst, *kind, &op.hlc),
+        }
+    }
+
+    /// ¿`dst` es ancestro de `src` por aristas `subtask` de esta lista?
+    /// (link `src --subtask→ dst` crearía un ciclo).
+    fn reaches(&self, src: &str, dst: &str) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut cur = src.to_string();
+        while let Some(parent) = self.parent_of(&cur) {
+            if parent == dst {
+                return true;
+            }
+            if !seen.insert(parent.clone()) {
+                break;
+            }
+            cur = parent;
+        }
+        false
+    }
+
+    /// Inserta una arista respetando HLC, lápidas y la regla de un padre
+    /// único para `subtask`.
+    fn add_edge(&mut self, src: &str, dst: &str, kind: LinkKind, hlc: &Hlc) -> Outcome {
+        let key: EdgeKey = (src.to_string(), dst.to_string(), kind);
+        if self.edge_tombstones.get(&key).is_some_and(|t| t >= hlc)
+            || self.edges.get(&key).is_some_and(|e| e >= hlc)
+        {
+            return Outcome::Ignored;
+        }
+        if kind == LinkKind::Subtask {
+            // Un solo padre: reemplaza la arista subtask previa de `src`.
+            let old: Vec<EdgeKey> = self
+                .edges
+                .keys()
+                .filter(|(s, _, k)| s == src && *k == LinkKind::Subtask && *dst != key.1)
+                .cloned()
+                .collect();
+            for old_key in old {
+                self.edges.remove(&old_key);
+                self.edge_tombstones.insert(old_key, hlc.clone());
+            }
+        }
+        self.edges.insert(key, hlc.clone());
+        Outcome::Applied
+    }
+
+    fn remove_edge(&mut self, src: &str, dst: &str, kind: LinkKind, hlc: &Hlc) -> Outcome {
+        let key: EdgeKey = (src.to_string(), dst.to_string(), kind);
+        let tomb = self
+            .edge_tombstones
+            .entry(key.clone())
+            .or_insert_with(|| hlc.clone());
+        if *tomb < *hlc {
+            *tomb = hlc.clone();
+        }
+        if self.edges.remove(&key).is_some() {
+            Outcome::Applied
+        } else {
+            Outcome::Ignored
+        }
+    }
+
+    /// Mata las aristas que tocan a `id` (al borrar la tarea).
+    fn kill_edges(&mut self, id: &str, hlc: &Hlc) {
+        let dead: Vec<EdgeKey> = self
+            .edges
+            .keys()
+            .filter(|(s, d, _)| s == id || d == id)
+            .cloned()
+            .collect();
+        for key in dead {
+            self.edges.remove(&key);
+            self.edge_tombstones.insert(key, hlc.clone());
         }
     }
 
@@ -143,6 +326,10 @@ impl ListDoc {
             applied = true;
         }
         self.refresh_derived(i);
+        let src = task.id.clone();
+        for link in &task.links {
+            applied |= self.add_edge(&src, &link.to, link.kind, hlc) == Outcome::Applied;
+        }
         if applied {
             Outcome::Applied
         } else {
@@ -215,6 +402,28 @@ impl ListDoc {
             }
             seen.insert(task.id.clone());
             order.push(task.id.clone());
+            // Difá los links como cualquier otro campo: los que faltan se
+            // agregan, los que sobran se borran (lápida).
+            {
+                let hlc = clock.tick(now_ms);
+                let desired: BTreeSet<EdgeKey> = task
+                    .links
+                    .iter()
+                    .map(|l| (task.id.clone(), l.to.clone(), l.kind))
+                    .collect();
+                let current: BTreeSet<EdgeKey> = self
+                    .edges
+                    .keys()
+                    .filter(|(s, _, _)| s == &task.id)
+                    .cloned()
+                    .collect();
+                for key in current.difference(&desired) {
+                    changed |= self.remove_edge(&key.0, &key.1, key.2, &hlc) == Outcome::Applied;
+                }
+                for key in desired.difference(&current) {
+                    changed |= self.add_edge(&key.0, &key.1, key.2, &hlc) == Outcome::Applied;
+                }
+            }
             match self.index(&task.id) {
                 Some(i) => {
                     let current = &self.tasks[i];
@@ -263,6 +472,7 @@ impl ListDoc {
         for id in by_id.into_keys() {
             let hlc = clock.tick(now_ms);
             self.clocks.remove(&id);
+            self.kill_edges(&id, &hlc);
             self.tombstones.insert(id, hlc);
         }
         changed
@@ -271,6 +481,7 @@ impl ListDoc {
     /// Borra lápidas anteriores a `before_ms`.
     pub fn prune_tombstones(&mut self, before_ms: u64) {
         self.tombstones.retain(|_, h| h.ms >= before_ms);
+        self.edge_tombstones.retain(|_, h| h.ms >= before_ms);
     }
 }
 

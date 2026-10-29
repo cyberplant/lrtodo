@@ -91,6 +91,22 @@ pub fn apply_diff(
     for task in after {
         match old.get(task.id.as_str()) {
             Some(prev) if kept.insert(task.id.clone()) => {
+                // Los links se sincronizan por arista, no por campo: difá el
+                // conjunto (las `subtask` las reemplaza el propio doc).
+                if prev.links != task.links {
+                    let old: std::collections::BTreeSet<_> =
+                        prev.links.iter().map(|l| (l.to.clone(), l.kind)).collect();
+                    let new: std::collections::BTreeSet<_> =
+                        task.links.iter().map(|l| (l.to.clone(), l.kind)).collect();
+                    for (to, kind) in old.difference(&new) {
+                        backend.unlink(list, &task.id, to, *kind)?;
+                        n += 1;
+                    }
+                    for (to, kind) in new.difference(&old) {
+                        backend.link(list, &task.id, to, *kind)?;
+                        n += 1;
+                    }
+                }
                 for change in prev.changes_to(&task) {
                     if !caps.supports(change.field()) {
                         continue;

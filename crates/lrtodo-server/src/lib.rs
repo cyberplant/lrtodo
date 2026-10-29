@@ -301,7 +301,7 @@ async fn collect(
                         error: None,
                         upstream_ms: None,
                     },
-                    Some(loaded.doc.tasks.clone()),
+                    Some(loaded.doc.tasks_with_links()),
                     loaded.doc.max_hlc().cloned(),
                 )),
                 // Archivo roto (p.ej. editado a mano con un error): se informa,

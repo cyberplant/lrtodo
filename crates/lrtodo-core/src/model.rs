@@ -61,6 +61,15 @@ pub struct Task {
         deserialize_with = "de::opt_string"
     )]
     pub completed: Option<String>,
+    /// Aristas que salen de esta tarea (`subtask`, `blocks`, `related`).
+    /// En el doc viven aparte (cada una con su HLC); acá se proyectan para
+    /// leer/escribir el YAML — también se pueden editar a mano.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "de::links"
+    )]
+    pub links: Vec<Link>,
     /// Campos desconocidos (agregados a mano): se preservan tal cual.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
@@ -118,6 +127,32 @@ impl Task {
             self.extra.clear();
         }
     }
+}
+
+/// Tipo de relación entre tareas.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    /// `src` es subtarea de `dst` (un padre por tarea: la arista nueva
+    /// reemplaza a la anterior).
+    Subtask,
+    /// `src` bloquea a `dst` (`dst` se muestra como bloqueada hasta que
+    /// `src` esté hecha; no impide tildarla).
+    Blocks,
+    /// Relación suelta, sin semántica extra.
+    #[default]
+    Related,
+}
+
+/// Una arista vista desde la tarea origen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Link {
+    /// `id`, o `otra-lista/id` para cruzar listas.
+    pub to: String,
+    #[serde(default)]
+    pub kind: LinkKind,
 }
 
 /// Campos sincronizables con reloj propio (LWW por campo).
@@ -290,6 +325,24 @@ mod de {
                 .collect(),
             Value::Null => vec![],
             other => scalar_to_string(other).into_iter().collect(),
+        })
+    }
+
+    /// `links:` tolerante: acepta `{to: x, kind: blocks}` o un string
+    /// (`kind: related` implícito).
+    pub fn links<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Link>, D::Error> {
+        Ok(match Value::deserialize(d)? {
+            Value::Array(items) => items
+                .into_iter()
+                .filter_map(|v| match v {
+                    Value::String(to) => Some(Link {
+                        to,
+                        kind: LinkKind::Related,
+                    }),
+                    other => serde_json::from_value(other).ok(),
+                })
+                .collect(),
+            _ => vec![],
         })
     }
 }

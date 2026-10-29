@@ -29,9 +29,28 @@ lrtodo serve                             # API + PWA en http://0.0.0.0:8765
 ```
 
 Comandos: `lists`, `ls`, `add`, `done`, `undo`, `rm`, `set`, `mv`, `edit`, `new`,
-`rmlist`, `convert`, `check`, `sync`, `status`, `tui` y `serve`. Con `--json` la
-salida es JSON. `lrtodo` a secas abre la TUI si está en una terminal (en un
-pipe, lista).
+`rmlist`, `link`, `unlink`, `convert`, `check`, `sync`, `status`, `tui` y
+`serve`. Con `--json` la salida es JSON. `lrtodo` a secas abre la TUI si está en
+una terminal (en un pipe, lista).
+
+### Links entre tareas
+
+Las tareas se pueden relacionar entre sí — incluso entre listas
+(`otra-lista/tarea`):
+
+```sh
+lrtodo link proyecto "escribir docs" blocks "lanzar"   # lanzar queda bloqueada
+lrtodo link proyecto refactor related tests            # relación suelta
+lrtodo add proyecto "subpaso" --parent "tarea grande"  # subtarea directa
+lrtodo unlink proyecto docs blocks lanzar
+```
+
+Los links viven en el YAML de cada tarea (`links: [{to: …, kind: …}]`), se
+sincronizan por arista (dos dispositivos pueden agregar links distintos sin
+pisarse) y se pueden editar a mano. Kinds: `subtask` (un padre por tarea, sin
+ciclos; `ls` la indenta), `blocks` (el destino aparece ⊘ atenuado hasta que el
+origen esté hecho) y `related`. En listas de HA los links sólo existen del lado
+de lrtodo (HA no los conoce).
 
 ### TUI
 

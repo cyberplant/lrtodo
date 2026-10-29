@@ -15,7 +15,7 @@ pub mod replica;
 pub use doc::{ListDoc, Outcome};
 pub use hlc::{Clock, Hlc};
 pub use id::Rng;
-pub use model::{Caps, Change, Field, ListId, ListKind, ListMeta, Task, TaskId};
+pub use model::{Caps, Change, Field, Link, LinkKind, ListId, ListKind, ListMeta, Task, TaskId};
 pub use op::{Op, OpKind};
 pub use protocol::{ListInfo, ListSnapshot, Rejection, SyncRequest, SyncResponse};
 pub use replica::{CachedList, ListView, Notice, Replica, TaskView};

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::hlc::Hlc;
-use crate::model::{Change, ListId, Task, TaskId};
+use crate::model::{Change, LinkKind, ListId, Task, TaskId};
 
 /// Una operación: la unidad de cambio y de sincronización.
 /// Es idempotente: reaplicarla no tiene efecto (LWW por HLC).
@@ -16,9 +16,27 @@ pub struct Op {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OpKind {
-    Add { task: Task },
-    Set { id: TaskId, change: Change },
-    Delete { id: TaskId },
+    Add {
+        task: Task,
+    },
+    Set {
+        id: TaskId,
+        change: Change,
+    },
+    Delete {
+        id: TaskId,
+    },
+    /// Arista `src → dst` (`dst` puede ser `otra-lista/id`).
+    Link {
+        src: TaskId,
+        dst: String,
+        kind: LinkKind,
+    },
+    Unlink {
+        src: TaskId,
+        dst: String,
+        kind: LinkKind,
+    },
 }
 
 impl OpKind {
@@ -26,6 +44,7 @@ impl OpKind {
         match self {
             OpKind::Add { task } => &task.id,
             OpKind::Set { id, .. } | OpKind::Delete { id } => id,
+            OpKind::Link { src, .. } | OpKind::Unlink { src, .. } => src,
         }
     }
 }

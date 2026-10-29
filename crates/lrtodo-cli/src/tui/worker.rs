@@ -52,6 +52,13 @@ pub enum Call {
     DeleteList {
         id: String,
     },
+    Link {
+        list: String,
+        src: String,
+        dst: String,
+        kind: lrtodo_core::LinkKind,
+        unlink: bool,
+    },
 }
 
 pub enum CallOut {
@@ -117,6 +124,7 @@ fn run(
                         | Call::Move { .. }
                         | Call::CreateList { .. }
                         | Call::DeleteList { .. }
+                        | Call::Link { .. }
                 );
                 if out.send(dispatch(backend, *call)).is_err() {
                     return;
@@ -160,6 +168,20 @@ fn dispatch(b: &mut dyn Backend, call: Call) -> anyhow::Result<CallOut> {
         }
         Call::DeleteList { id } => {
             b.delete_list(&id)?;
+            CallOut::Unit
+        }
+        Call::Link {
+            list,
+            src,
+            dst,
+            kind,
+            unlink,
+        } => {
+            if unlink {
+                b.unlink(&list, &src, &dst, kind)?;
+            } else {
+                b.link(&list, &src, &dst, kind)?;
+            }
             CallOut::Unit
         }
     })
@@ -297,6 +319,40 @@ impl Backend for ChanBackend {
 
     fn delete_list(&mut self, id: &str) -> anyhow::Result<()> {
         self.call(Call::DeleteList { id: id.to_string() })?;
+        Ok(())
+    }
+
+    fn link(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: lrtodo_core::LinkKind,
+    ) -> anyhow::Result<()> {
+        self.call(Call::Link {
+            list: list.to_string(),
+            src: src.to_string(),
+            dst: dst.to_string(),
+            kind,
+            unlink: false,
+        })?;
+        Ok(())
+    }
+
+    fn unlink(
+        &mut self,
+        list: &str,
+        src: &str,
+        dst: &str,
+        kind: lrtodo_core::LinkKind,
+    ) -> anyhow::Result<()> {
+        self.call(Call::Link {
+            list: list.to_string(),
+            src: src.to_string(),
+            dst: dst.to_string(),
+            kind,
+            unlink: true,
+        })?;
         Ok(())
     }
 

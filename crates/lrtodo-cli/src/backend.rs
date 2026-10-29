@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use lrtodo_core::{
-    Caps, Change, Clock, ListInfo, ListKind, Op, OpKind, Replica, Rng, SyncResponse, Task, TaskId,
-    TaskView,
+    Caps, Change, Clock, LinkKind, ListInfo, ListKind, Op, OpKind, Replica, Rng, SyncResponse,
+    Task, TaskId, TaskView,
 };
 use lrtodo_store::{Layout, Store, now_ms, write_atomic};
 
@@ -67,6 +67,10 @@ pub trait Backend {
     fn create_list(&mut self, id: &str, name: Option<&str>, layout: Layout) -> anyhow::Result<()>;
     /// Borra una lista entera (irreversible).
     fn delete_list(&mut self, id: &str) -> anyhow::Result<()>;
+    /// Crea una arista `src → dst` (`dst` puede ser `otra-lista/id`).
+    fn link(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()>;
+    /// Quita una arista (sin efecto si no existía).
+    fn unlink(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()>;
     /// Sincroniza (remoto). Devuelve un mensaje de estado para mostrar, si hay.
     fn sync(&mut self) -> anyhow::Result<Option<String>>;
     /// Pull incondicional (la TUI lo llama periódicamente y ante eventos).
@@ -172,13 +176,12 @@ impl Backend for Local {
 
     fn tasks(&mut self, list: &str) -> anyhow::Result<Vec<TaskView>> {
         ensure_local(list)?;
-        Ok(self
-            .store
-            .read(list)?
-            .doc
-            .tasks
+        let doc = self.store.read(list)?.doc;
+        Ok(doc
+            .tasks_with_links()
             .into_iter()
             .map(|task| TaskView {
+                blocked: doc.blocked(&task.id),
                 task,
                 pending: false,
             })
@@ -226,6 +229,24 @@ impl Backend for Local {
         ensure_local(id)?;
         self.store.remove_list(id)?;
         Ok(())
+    }
+
+    fn link(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()> {
+        ensure_local(list)?;
+        self.apply(list, |_| OpKind::Link {
+            src: src.into(),
+            dst: dst.into(),
+            kind,
+        })
+    }
+
+    fn unlink(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()> {
+        ensure_local(list)?;
+        self.apply(list, |_| OpKind::Unlink {
+            src: src.into(),
+            dst: dst.into(),
+            kind,
+        })
     }
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {
@@ -443,6 +464,18 @@ impl Backend for Remote {
         self.synced = false;
         self.ensure_fresh();
         Ok(())
+    }
+
+    fn link(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()> {
+        self.ensure_fresh();
+        self.replica.link(list, src, dst, kind, now_ms())?;
+        self.save()
+    }
+
+    fn unlink(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()> {
+        self.ensure_fresh();
+        self.replica.unlink(list, src, dst, kind, now_ms())?;
+        self.save()
     }
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {

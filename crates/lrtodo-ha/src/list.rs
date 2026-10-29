@@ -115,6 +115,8 @@ impl HaList {
                 OpKind::Add { .. } => f::CREATE,
                 OpKind::Set { .. } => f::UPDATE,
                 OpKind::Delete { .. } => f::DELETE,
+                // Los links no existen en HA: viven en el doc local, no se empujan.
+                OpKind::Link { .. } | OpKind::Unlink { .. } => 0,
             };
             if self.features & needed == 0 {
                 rejected.push(Rejection {

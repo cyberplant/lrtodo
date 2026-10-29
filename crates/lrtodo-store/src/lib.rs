@@ -366,7 +366,12 @@ impl Store {
     }
 
     fn save(&self, id: &str, loaded: &Loaded) -> Result<()> {
-        let hash = self.write_source(id, loaded.layout, &loaded.header, &loaded.doc.tasks)?;
+        let hash = self.write_source(
+            id,
+            loaded.layout,
+            &loaded.header,
+            &loaded.doc.tasks_with_links(),
+        )?;
         let state = SideState {
             source_hash: hash,
             doc: loaded.doc.clone(),

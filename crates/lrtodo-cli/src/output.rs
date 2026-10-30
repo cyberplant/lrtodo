@@ -2,7 +2,7 @@ use std::io::IsTerminal;
 
 use lrtodo_core::{ListKind, TaskView};
 
-use crate::backend::ListRow;
+use lrtodo_client::ListRow;
 
 struct Style {
     on: bool,
@@ -38,15 +38,7 @@ impl Style {
     }
 }
 
-pub fn ago(ms: u64) -> String {
-    let s = ms / 1000;
-    match s {
-        0..60 => format!("{s}s"),
-        60..3600 => format!("{} min", s / 60),
-        3600..86400 => format!("{} h", s / 3600),
-        _ => format!("{} d", s / 86400),
-    }
-}
+pub use lrtodo_client::ago;
 
 pub fn lists(rows: &[ListRow]) {
     let st = Style::new();

@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use lrtodo_core::{Caps, Change, Task};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::Backend;
+use lrtodo_client::Backend;
 
 #[derive(Serialize, Deserialize)]
 struct Doc {

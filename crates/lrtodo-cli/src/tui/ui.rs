@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
 use super::app::{App, Focus, InputKind, Mode};
-use crate::backend::SyncState;
 use crate::output::ago;
+use lrtodo_client::SyncState;
 use lrtodo_core::{LinkKind, ListKind, TaskView};
 use lrtodo_store::now_ms;
 

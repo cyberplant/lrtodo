@@ -14,7 +14,7 @@ use anyhow::anyhow;
 use lrtodo_core::{Caps, Change, Task, TaskId, TaskView};
 use lrtodo_store::Layout;
 
-use crate::backend::{Backend, ListRow, SyncState};
+use lrtodo_client::{Backend, ListRow, SyncState};
 
 /// Cada cuánto se sincroniza en segundo plano.
 const POLL_OK: Duration = Duration::from_secs(15);

@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use lrtodo_core::{Change, LinkKind, Task, TaskView};
 
 use super::worker::{ChanBackend, Msg};
-use crate::backend::{Backend, ListRow, SyncState};
+use lrtodo_client::{Backend, ListRow, SyncState};
 
 fn kind_label(k: LinkKind) -> &'static str {
     match k {

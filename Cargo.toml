@@ -9,6 +9,7 @@ license = "MIT"
 repository = "https://github.com/cyberplant/lrtodo"
 
 [workspace.dependencies]
+lrtodo-client = { path = "crates/lrtodo-client" }
 lrtodo-core = { path = "crates/lrtodo-core" }
 lrtodo-store = { path = "crates/lrtodo-store" }
 lrtodo-ha = { path = "crates/lrtodo-ha" }
@@ -35,6 +36,9 @@ serde_json = "1.0.154"
 serde_yaml_ng = "0.10.0"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+tao = "0.34"
+tray-icon = "0.26"
+muda = "0.21"
 tokio = { version = "1.53.3", features = ["full"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower-http = { version = "0.7.1", features = ["cors"] }

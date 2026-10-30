@@ -1,4 +1,3 @@
-mod backend;
 mod config;
 mod editor;
 mod output;
@@ -8,9 +7,9 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Context, anyhow, bail};
-use backend::{Backend, Local, Remote};
 use clap::{Parser, Subcommand};
 use config::Config;
+use lrtodo_client::{Backend, Local, Remote};
 use lrtodo_core::{Change, Task, TaskView};
 use lrtodo_store::Layout;
 

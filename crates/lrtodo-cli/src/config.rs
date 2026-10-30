@@ -19,12 +19,7 @@ pub struct Config {
     pub serve: ServeConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RemoteConfig {
-    pub url: String,
-    pub token: Option<String>,
-}
+pub use lrtodo_client::RemoteConfig;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

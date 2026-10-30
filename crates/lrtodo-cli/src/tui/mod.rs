@@ -20,8 +20,8 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::backend::Backend;
 use app::{App, Effect};
+use lrtodo_client::Backend;
 use worker::{ChanBackend, Msg};
 
 /// Restaura la terminal aunque se salga por error.

@@ -67,6 +67,14 @@ linkear (elegí kind → destino), `U` quitar un link, `n` crear lista
 `/` filtrar, `v` mostrar/ocultar hechas, `E` abrir la lista en
 `$EDITOR`, `r` sincronizar, `?` ayuda, `q` salir.
 
+### Barra de menús
+
+`lrtodo-tray` pone un casillero en la barra de menús (mismo backend: local o
+`--server`): un submenú por lista con las tareas (click = tildar), el título
+del ícono muestra el estado de sync, `↻ Sincronizar` y `Salir`. Se actualiza
+solo cada ~10 s. Para empaquetarlo como app sin ícono en el dock:
+`cargo bundle --bin lrtodo-tray`.
+
 ## Configuración (`~/.config/lrtodo/config.yaml`)
 
 ```yaml

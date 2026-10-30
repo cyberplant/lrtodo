@@ -18,6 +18,11 @@ core compilado a WASM.
   La TUI (`src/tui/`): la UI corre en el hilo principal y el backend en un hilo
   worker (`worker.rs`); se comunican con `ChanBackend`, que implementa `Backend`
   vía canales. Refresco en vivo: SSE `/api/events` en remoto, `notify` en local.
+- `crates/lrtodo-client`: el `Backend` compartido (`Local`/`Remote`, `SyncState`,
+  `ClientConfig` tolerante). Lo usan cli, tui y tray.
+- `crates/lrtodo-tray`: `lrtodo-tray`, ícono en la barra de menús
+  (tray-icon/muda/tao). Worker con el backend + poll 10 s; menú con las tareas
+  (click tilda). `.app` con `cargo bundle` (LSUIElement en `Info.plist`).
 - `crates/lrtodo-wasm`: binding wasm-bindgen de `Replica` (JSON in/out).
 - `web/`: PWA. `src/lib/app.svelte.ts` tiene el estado y el motor de sync.
 - `ha-addon/lrtodo/`, `repository.yaml` y `Dockerfile`: add-on de HA / imagen.

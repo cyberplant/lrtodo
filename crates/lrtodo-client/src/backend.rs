@@ -13,7 +13,7 @@ use lrtodo_core::{
 };
 use lrtodo_store::{Layout, Store, now_ms, write_atomic};
 
-use crate::config::RemoteConfig;
+use crate::RemoteConfig;
 
 /// Una fila del listado de listas.
 pub struct ListRow {
@@ -36,7 +36,7 @@ pub enum SyncState {
     },
 }
 
-pub trait Backend {
+pub trait Backend: Send {
     fn lists(&mut self) -> anyhow::Result<Vec<ListRow>>;
     fn tasks(&mut self, list: &str) -> anyhow::Result<Vec<TaskView>>;
     fn caps(&mut self, list: &str) -> anyhow::Result<Caps>;
@@ -539,7 +539,7 @@ impl Remote {
         let r = &self.replica;
         let last = r
             .last_sync_ms
-            .map(|ms| format!("hace {}", crate::output::ago(now_ms().saturating_sub(ms))))
+            .map(|ms| format!("hace {}", crate::ago(now_ms().saturating_sub(ms))))
             .unwrap_or_else(|| "nunca".into());
         let mut s = format!(
             "servidor: {}\ndispositivo: {}\núltima sync: {last}\ncambios pendientes: {}",

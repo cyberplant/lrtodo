@@ -1,0 +1,30 @@
+[package]
+name = "lrtodo-tray"
+description = "lrtodo en la barra de menús: tareas a un click (macOS/Windows/Linux)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lrtodo-tray"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dirs.workspace = true
+lrtodo-client.workspace = true
+lrtodo-core.workspace = true
+lrtodo-store.workspace = true
+muda.workspace = true
+tao.workspace = true
+tray-icon.workspace = true
+
+# Empaquetado .app: cargo bundle --bin lrtodo-tray
+[package.metadata.bundle]
+name = "lrtodo"
+identifier = "com.lrtodo.tray"
+category = "public.app-category.productivity"
+short_description = "Todos en la barra de menús"
+# LSUIElement: app de barra de menús, sin ícono en el dock.
+info_plist_path = "Info.plist"

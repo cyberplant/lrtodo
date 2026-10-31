@@ -189,7 +189,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     if let Cmd::Tui = cmd {
         let backend: Box<dyn Backend + Send> = match remote {
             Some(r) => Box::new(Remote::open(r)?),
-            None => Box::new(Local::open(data_dir)?),
+            None => Box::new(Local::open(data_dir, cfg.versioning.unwrap_or_default())?),
         };
         return tui::run(backend, cfg.default_list.clone());
     }
@@ -198,7 +198,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let mut remote_backend: Option<Remote> = None;
     let backend: &mut dyn Backend = match remote {
         Some(r) => remote_backend.insert(Remote::open(r)?),
-        None => local.insert(Local::open(data_dir)?),
+        None => local.insert(Local::open(data_dir, cfg.versioning.unwrap_or_default())?),
     };
     let default_list = cfg.default_list.clone();
 

@@ -80,6 +80,7 @@ solo cada ~10 s. Para empaquetarlo como app sin ícono en el dock:
 ```yaml
 data_dir: ~/todo            # dónde viven los YAML (modo local y serve)
 default_list: compras       # para `lrtodo ls` sin argumentos
+versioning: true            # git init en data_dir + autocommit por cada cambio
 
 # Opcional: usar la CLI contra un servidor (con cache offline) en vez de los archivos.
 server:
@@ -107,11 +108,16 @@ Hay dos layouts, que se pueden elegir por lista (`lrtodo new x --layout dir`,
 `lrtodo convert x --layout file`):
 
 - `compras.yaml`: un archivo por lista.
-- `compras/_list.yaml` + `compras/<id>.yaml`: un archivo por tarea. Da menos
-  conflictos si sincronizás con git o Syncthing.
+- `compras/_list.yaml` + `compras/NNNN-slug.yaml`: un archivo por tarea. Da menos
+  conflictos si sincronizás con git o Syncthing; el prefijo `NNNN` es la
+  posición (renombrarlo reordena la lista).
 
 Ver [docs/format.md](docs/format.md). Los relojes y lápidas de sincronización van
 en `.lrtodo/` y no hace falta versionarlos.
+
+Con `versioning: true` lrtodo hace `git init` en el `data_dir` (con `.gitignore`
+para `.lrtodo/`, un `README.md` y un `AGENTS.md` con el formato) y un commit por
+cada cambio — `git revert` en ese directorio deshace y se propaga a los clientes.
 
 ## Home Assistant
 

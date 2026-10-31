@@ -23,6 +23,8 @@ pub struct ClientConfig {
     pub default_list: Option<String>,
     /// Si está, se trabaja contra el servidor (con cache offline).
     pub server: Option<RemoteConfig>,
+    /// Versionado git del directorio de datos (autocommit por cambio).
+    pub versioning: Option<bool>,
 }
 
 pub fn expand(p: &str) -> PathBuf {

@@ -13,6 +13,7 @@ async fn app(token: Option<&str>) -> (tempfile::TempDir, Arc<App>) {
         state_dir: None,
         bind: default_bind(),
         token: token.map(str::to_string),
+        versioning: false,
         ha: None,
         trust_ingress: true,
     };

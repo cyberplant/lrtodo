@@ -70,7 +70,10 @@ fn main() -> Result<()> {
     let cfg = ClientConfig::load(args.config.as_deref())?;
     let backend: Box<dyn Backend> = match cfg.remote(args.server.as_deref()) {
         Some(rc) => Box::new(Remote::open(rc)?),
-        None => Box::new(Local::open(cfg.data_dir(args.data_dir.as_deref()))?),
+        None => Box::new(Local::open(
+            cfg.data_dir(args.data_dir.as_deref()),
+            cfg.versioning.unwrap_or_default(),
+        )?),
     };
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();

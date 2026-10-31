@@ -15,6 +15,8 @@ pub struct Config {
     pub default_list: Option<String>,
     /// Si está, la CLI trabaja contra el servidor (con cache offline).
     pub server: Option<RemoteConfig>,
+    /// Versionado git del directorio de datos (autocommit por cambio).
+    pub versioning: Option<bool>,
     #[serde(default)]
     pub serve: ServeConfig,
 }
@@ -27,6 +29,7 @@ pub struct ServeConfig {
     pub bind: Option<String>,
     pub token: Option<String>,
     pub state_dir: Option<String>,
+    pub versioning: Option<bool>,
     pub ha: Option<HaSection>,
 }
 
@@ -152,6 +155,8 @@ impl Config {
                 .or_else(|| self.serve.bind.clone())
                 .unwrap_or_else(default_bind),
             token: env("LRTODO_TOKEN").or_else(|| self.serve.token.clone()),
+            versioning: env("LRTODO_VERSIONING").is_some_and(|v| v == "1" || v == "true")
+                || self.serve.versioning.unwrap_or_default(),
             ha,
         })
     }

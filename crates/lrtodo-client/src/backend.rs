@@ -101,10 +101,12 @@ pub struct Local {
 }
 
 impl Local {
-    pub fn open(dir: PathBuf) -> anyhow::Result<Self> {
+    pub fn open(dir: PathBuf, versioned: bool) -> anyhow::Result<Self> {
         let node = format!("cli-{}", hostname());
+        let mut store = Store::open(&dir, &node).with_context(|| format!("{}", dir.display()))?;
+        store.set_versioned(versioned);
         Ok(Self {
-            store: Store::open(&dir, &node).with_context(|| format!("{}", dir.display()))?,
+            store,
             clock: Clock::new(node),
             rng: Rng::new(now_ms() ^ (std::process::id() as u64) << 20),
         })

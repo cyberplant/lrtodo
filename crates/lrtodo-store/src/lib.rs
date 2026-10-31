@@ -124,6 +124,8 @@ pub struct Store {
     root: PathBuf,
     clock: Mutex<Clock>,
     rng: Mutex<Rng>,
+    /// Versionado git opcional: autocommit tras cada `save`.
+    versioned: bool,
 }
 
 pub fn now_ms() -> u64 {
@@ -160,7 +162,37 @@ impl Store {
             root,
             clock: Mutex::new(Clock::new(node)),
             rng: Mutex::new(Rng::new(seed)),
+            versioned: false,
         })
+    }
+
+    /// Activa el versionado git: inicializa el repo si no existe
+    /// (`.gitignore` de `.lrtodo/`, README, AGENTS.md) y commitea cada `save`.
+    pub fn set_versioned(&mut self, versioned: bool) {
+        if versioned {
+            let _ = ensure_git(&self.root);
+        }
+        self.versioned = versioned;
+    }
+
+    fn git_commit(&self, list: &str) {
+        if !self.versioned {
+            return;
+        }
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&self.root)
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        git(&["add", "-A"]);
+        let msg = format!("lrtodo: {list}");
+        git(&["commit", "-qm", &msg]);
     }
 
     pub fn root(&self) -> &Path {
@@ -377,7 +409,9 @@ impl Store {
             doc: loaded.doc.clone(),
         };
         let bytes = serde_json::to_vec(&state).expect("serializable");
-        write_atomic(&self.state_path(id), &bytes)
+        write_atomic(&self.state_path(id), &bytes)?;
+        self.git_commit(id);
+        Ok(())
     }
 
     fn read_source(&self, id: &str) -> Result<Source> {
@@ -435,12 +469,18 @@ impl Store {
                 continue;
             };
             if task.id.is_empty() {
-                task.id = stem;
+                // Sin id en el archivo: el slug del nombre (sin el prefijo
+                // `NNNN-`) hace de id, así no queda `0001-x` como id.
+                task.id = stem
+                    .split_once('-')
+                    .filter(|(pre, _)| pre.chars().all(|c| c.is_ascii_digit()))
+                    .map(|(_, rest)| rest.to_string())
+                    .unwrap_or(stem);
             }
             tasks.push(task);
         }
-        // Orden estable: por fecha de creación y luego id (ULID ~ creación).
-        tasks.sort_by(|a, b| (&a.created, &a.id).cmp(&(&b.created, &b.id)));
+        // El orden lo da el nombre del archivo (`files.sort()` arriba):
+        // `NNNN-slug.yaml` — renombrar el prefijo reordena la lista.
         Ok(Source {
             layout: Layout::Dir,
             header,
@@ -480,8 +520,8 @@ impl Store {
                     write_atomic(&header_path, &header_bytes)?;
                 }
                 let mut wanted = BTreeMap::new();
-                for task in tasks {
-                    wanted.insert(format!("{}.yaml", task.id), task);
+                for (i, task) in tasks.iter().enumerate() {
+                    wanted.insert(task_file_name(i, task), task);
                 }
                 for entry in fs::read_dir(&dir).map_err(io_err(&dir))? {
                     let entry = entry.map_err(io_err(&dir))?;
@@ -571,3 +611,89 @@ fn to_yaml<T: Serialize>(value: &T) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests;
+
+/// `NNNN-slug.yaml`: la posición en el doc da el prefijo, el título el slug.
+fn task_file_name(i: usize, task: &Task) -> String {
+    format!("{:04}-{}.yaml", i + 1, slugify(&task.title))
+}
+
+/// Slug del título: alfanumérico (unicode) y `-`/`_`; el resto a `_`.
+/// Es estable sólo si el título no cambia (renombrar título = rename en git).
+fn slugify(title: &str) -> String {
+    let mut slug = String::with_capacity(title.len());
+    let mut last_us = false;
+    for c in title.chars().take(40) {
+        if c.is_alphanumeric() || c == '-' {
+            slug.push(c);
+            last_us = false;
+        } else if !last_us && !slug.is_empty() {
+            slug.push('_');
+            last_us = true;
+        }
+    }
+    let slug = slug.trim_end_matches('_').to_string();
+    if slug.is_empty() {
+        "tarea".into()
+    } else {
+        slug
+    }
+}
+
+/// `git init` en `root` si no hay `.git`, con `.gitignore`, README y AGENTS.
+/// Errores se ignoran: el versionado nunca rompe un save.
+fn ensure_git(root: &Path) -> std::io::Result<()> {
+    if root.join(".git").exists() {
+        return Ok(());
+    }
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["init", "-q"])
+        .status()?;
+    fs::write(root.join(".gitignore"), ".lrtodo/\n")?;
+    fs::write(
+        root.join("README.md"),
+        "# lrtodo\n\nTracking de tareas con [lrtodo](https://github.com/cyberplant/lrtodo).\n\
+         Cada directorio es una lista y cada archivo `NNNN-slug.yaml` una tarea;\n\
+         el prefijo numérico es su posición (renombrarlo reordena). Cada cambio\n\
+         hace un commit automático — `git log` es la historia, `git revert` deshace.\n",
+    )?;
+    fs::write(
+        root.join("AGENTS.md"),
+        "# lrtodo — guía para agentes\n\n\
+         Podés leer y editar las tareas directamente: los `.yaml` se ingestan\n\
+         automáticamente (los cambios se convierten en ops y se sincronizan).\n\n\
+         ## Estructura\n\n\
+         - `<lista>/` = una lista; `<lista>/_list.yaml` su nombre/layout.\n\
+         - `<lista>/NNNN-slug.yaml` = una tarea; `NNNN` es la posición\n\
+           (para reordenar, renombrá el prefijo).\n\n\
+         ## Campos de una tarea\n\n\
+         ```yaml\n\
+         id: 01J...\n\
+         title: \"vender la Mac mini\"\n\
+         done: false\n\
+         created: 1700000000000   # ms epoch\n\
+         completed: null          # ms epoch si está hecha\n\
+         due: null                # YYYY-MM-DD\n\
+         priority: null           # u8\n\
+         notes: |                 # markdown libre\n\
+         tags: [tag1]\n\
+         links:\n\
+           - to: 01JXXX           # id de otra tarea, o lista/id\n\
+             kind: subtask        # subtask | blocks | related\n\
+         ```\n\n\
+         Para crear una tarea agregá un `.yaml` con `title` (id opcional: lo\n\
+         toma del nombre del archivo). Para borrarla, borrá el archivo.\n",
+    )?;
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["add", "-A"])
+        .status();
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["commit", "-qm", "lrtodo: init"])
+        .status();
+    Ok(())
+}

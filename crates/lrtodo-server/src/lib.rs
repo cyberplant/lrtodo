@@ -38,6 +38,9 @@ pub struct ServerConfig {
     /// Token requerido por la API (Bearer o `?token=`). Sin token, la API es abierta.
     #[serde(default)]
     pub token: Option<String>,
+    /// Versionado git del directorio de datos (autocommit por cambio).
+    #[serde(default)]
+    pub versioning: bool,
     #[serde(default)]
     pub ha: Option<HaConfig>,
     /// Add-on de HA: las requests que llegan por el ingress (ya autenticadas
@@ -65,7 +68,9 @@ pub struct App {
 
 impl App {
     pub async fn new(cfg: &ServerConfig) -> anyhow::Result<Arc<Self>> {
-        let store = Arc::new(Store::open(&cfg.data_dir, "server")?);
+        let mut s = Store::open(&cfg.data_dir, "server")?;
+        s.set_versioned(cfg.versioning);
+        let store = Arc::new(s);
         let (events, _) = broadcast::channel(256);
         let ha = match &cfg.ha {
             Some(ha) => {

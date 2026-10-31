@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { marked } from 'marked';
   import { app, type ListView, type Task, type TaskLink } from '../lib/app.svelte';
 
   let { task, list, depth = 0, tasks = [] }: { task: Task; list: ListView; depth?: number; tasks?: Task[] } = $props();
@@ -84,7 +85,10 @@
         <label>Vence <input type="date" bind:value={due} /></label>
       {/if}
       {#if caps.notes}
-        <textarea bind:value={notes} placeholder="Notas" rows="2"></textarea>
+        <textarea bind:value={notes} placeholder="Notas (markdown)" rows="4"></textarea>
+        {#if notes.trim()}
+          <div class="md-preview">{@html marked.parse(notes)}</div>
+        {/if}
       {/if}
       {#if caps.tags}
         <input bind:value={tags} placeholder="etiquetas, separadas por coma" />

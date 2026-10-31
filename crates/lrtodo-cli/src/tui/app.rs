@@ -49,6 +49,11 @@ pub enum Mode {
         sel: usize,
         next: PickNext,
     },
+    /// Visor de notas markdown de una tarea (scroll con j/k, e edita).
+    Notes {
+        id: String,
+        offset: usize,
+    },
     Help,
 }
 
@@ -155,6 +160,8 @@ impl Line {
 pub enum Effect {
     /// Abrir `$EDITOR` sobre la lista (suspende la TUI).
     Edit { list: String },
+    /// Editar sólo la nota de una tarea en `$EDITOR`.
+    EditNotes { list: String, id: String },
 }
 
 pub struct App {
@@ -395,6 +402,7 @@ impl App {
             Mode::Form { .. } => self.key_form(key),
             Mode::Confirm { .. } => self.key_confirm(key),
             Mode::Pick { .. } => self.key_pick(key),
+            Mode::Notes { .. } => self.key_notes(key),
             Mode::Help => self.mode = Mode::Normal,
         }
     }
@@ -478,6 +486,11 @@ impl App {
             KeyCode::Char('m') if self.focus == Focus::Tasks => self.open_picker(),
             KeyCode::Char('L') if self.focus == Focus::Tasks => self.link_start(),
             KeyCode::Char('U') if self.focus == Focus::Tasks => self.unlink_start(),
+            KeyCode::Char('o') if self.focus == Focus::Tasks => {
+                if let Some((id, _)) = self.selected_task() {
+                    self.mode = Mode::Notes { id, offset: 0 };
+                }
+            }
             KeyCode::Char('E') => {
                 if let Some(list) = self.current_list_id() {
                     self.effect = Some(Effect::Edit { list });
@@ -968,6 +981,34 @@ impl App {
                 let check_x = self.tasks_area.x + 1 + guides.len() as u16 * 3;
                 if x >= check_x && x < check_x + 4 {
                     self.toggle();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// j/k scrollea, `e` edita la nota en $EDITOR, esc/q cierra.
+    fn key_notes(&mut self, key: KeyEvent) {
+        let Mode::Notes { id, .. } = &self.mode else {
+            return;
+        };
+        let id = id.clone();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Mode::Notes { offset, .. } = &mut self.mode {
+                    *offset = offset.saturating_add(1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Mode::Notes { offset, .. } = &mut self.mode {
+                    *offset = offset.saturating_sub(1);
+                }
+            }
+            KeyCode::Char('e' | 'E') => {
+                if let Some(list) = self.current_list_id() {
+                    self.effect = Some(Effect::EditNotes { list, id });
+                    self.mode = Mode::Normal;
                 }
             }
             _ => {}

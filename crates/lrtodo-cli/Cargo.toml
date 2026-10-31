@@ -19,6 +19,7 @@ lrtodo-core.workspace = true
 lrtodo-server.workspace = true
 lrtodo-store.workspace = true
 notify.workspace = true
+pulldown-cmark.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true
 serde.workspace = true

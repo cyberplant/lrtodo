@@ -424,3 +424,13 @@ nav.top h1 {
   color: var(--bg);
   text-decoration: underline;
 }
+
+.md-preview {
+  background: var(--bg-alt, rgba(255,255,255,.05));
+  border-radius: 6px;
+  padding: .4rem .7rem;
+  margin: .3rem 0;
+  font-size: .9em;
+}
+.md-preview h1,.md-preview h2,.md-preview h3 { margin:.4em 0 .2em; }
+.md-preview p { margin:.3em 0; }

@@ -44,20 +44,8 @@ pub fn edit(backend: &mut dyn Backend, list: &str) -> anyhow::Result<usize> {
     tmp.write_all(header.as_bytes())?;
     tmp.write_all(body.as_bytes())?;
     tmp.flush()?;
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
     let after = loop {
-        let mut parts = editor.split_whitespace();
-        let program = parts.next().unwrap_or("vi");
-        let status = std::process::Command::new(program)
-            .args(parts)
-            .arg(tmp.path())
-            .status()
-            .with_context(|| format!("no se pudo ejecutar {editor}"))?;
-        if !status.success() {
-            bail!("el editor terminó con error; no se aplicó nada");
-        }
+        run_editor(tmp.path())?;
         let text = std::fs::read_to_string(tmp.path())?;
         match serde_yaml_ng::from_str::<Doc>(&text) {
             Ok(doc) => break doc.items,
@@ -76,6 +64,24 @@ pub fn edit(backend: &mut dyn Backend, list: &str) -> anyhow::Result<usize> {
         }
     };
     apply_diff(backend, list, &caps, &before, after)
+}
+
+/// Corre `$VISUAL`/`$EDITOR` (vi por defecto) sobre `path` y espera que cierre.
+pub fn run_editor(path: &std::path::Path) -> anyhow::Result<()> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".into());
+    let mut parts = editor.split_whitespace();
+    let program = parts.next().unwrap_or("vi");
+    let status = std::process::Command::new(program)
+        .args(parts)
+        .arg(path)
+        .status()
+        .with_context(|| format!("no se pudo ejecutar {editor}"))?;
+    if !status.success() {
+        bail!("el editor terminó con error; no se aplicó nada");
+    }
+    Ok(())
 }
 
 pub fn apply_diff(

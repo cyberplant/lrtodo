@@ -86,8 +86,12 @@ pub fn run(backend: Box<dyn Backend + Send>, default_list: Option<String>) -> an
                 _ => {}
             }
         }
-        if let Some(Effect::Edit { list }) = app.effect.take() {
-            edit(&mut restore, &mut term, &mut app, &list);
+        match app.effect.take() {
+            Some(Effect::Edit { list }) => edit(&mut restore, &mut term, &mut app, &list),
+            Some(Effect::EditNotes { list, id }) => {
+                edit_notes(&mut restore, &mut term, &mut app, &list, &id)
+            }
+            None => {}
         }
         if app.quit {
             return Ok(());
@@ -111,5 +115,45 @@ fn edit(
         Err(e) => app.msg(Msg::Flash(format!("editor: {e:#}"))),
     }
     app.refresh_lists();
+    app.refresh_tasks();
+}
+
+/// `$EDITOR` sólo sobre la nota de una tarea (archivo .md temporal).
+fn edit_notes(
+    restore: &mut Restore,
+    term: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    app: &mut App,
+    list: &str,
+    id: &str,
+) {
+    *restore = Restore::leave();
+    let result = (|| -> anyhow::Result<()> {
+        let before = app
+            .tasks
+            .iter()
+            .find(|t| t.task.id == id)
+            .and_then(|t| t.task.notes.clone())
+            .unwrap_or_default();
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("nota.md");
+        std::fs::write(&path, &before)?;
+        crate::editor::run_editor(&path)?;
+        let after = std::fs::read_to_string(&path)?;
+        let after = after.trim_end_matches('\n').to_string();
+        if after != before {
+            app.chan.set(
+                list,
+                id,
+                lrtodo_core::Change::Notes((!after.is_empty()).then_some(after)),
+            )?;
+        }
+        Ok(())
+    })();
+    let _ = restore.enter();
+    let _ = term.clear();
+    match result {
+        Ok(()) => app.msg(Msg::Flash("nota actualizada".into())),
+        Err(e) => app.msg(Msg::Flash(format!("editor: {e:#}"))),
+    }
     app.refresh_tasks();
 }

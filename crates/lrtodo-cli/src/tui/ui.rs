@@ -57,6 +57,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::Form { .. } => draw_form(f, app, area),
         Mode::Confirm { .. } => draw_confirm(f, app, area),
         Mode::Pick { .. } => draw_pick(f, app, area),
+        Mode::Notes { .. } => draw_notes(f, app, area),
         Mode::Help => draw_help(f, area),
         Mode::Normal => {}
     }
@@ -288,6 +289,7 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
         Mode::Form { .. } => " tab/↑/↓ campo · enter guardar · esc cancelar",
         Mode::Confirm { .. } => " s confirmar · cualquier otra tecla cancela",
         Mode::Pick { .. } => " j/k elegir · enter aceptar · esc cancelar",
+        Mode::Notes { .. } => " j/k scrollear · e editar en $EDITOR · esc/q cerrar",
         Mode::Help => " cualquier tecla para volver",
     };
     f.render_widget(
@@ -457,4 +459,148 @@ fn draw_help(f: &mut Frame, area: Rect) {
         })
         .collect();
     f.render_widget(Paragraph::new(lines).block(popup("Teclas")), rect);
+}
+
+// ---------------------------------------------------------- notas (markdown)
+
+fn draw_notes(f: &mut Frame, app: &App, area: Rect) {
+    let Mode::Notes { id, offset } = &app.mode else {
+        return;
+    };
+    let task = app.tasks.iter().find(|t| t.task.id == *id);
+    let title = task
+        .map(|t| t.task.title.clone())
+        .unwrap_or_else(|| "nota".into());
+    let text = task
+        .and_then(|t| t.task.notes.clone())
+        .unwrap_or_else(|| "(sin nota — `e` para crearla)".into());
+    let lines = md_lines(&text);
+    let rect = centered(
+        area,
+        70,
+        (lines.len() as u16 + 2).clamp(6, area.height.saturating_sub(2)),
+    );
+    f.render_widget(Clear, rect);
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(popup(&format!("{title} — notas")))
+            .scroll((*offset as u16, 0)),
+        rect,
+    );
+}
+
+/// Markdown → líneas con estilo (pulldown-cmark → spans de ratatui).
+fn md_lines(text: &str) -> Vec<Line<'static>> {
+    use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+
+    let mut lines: Vec<Line<'static>> = vec![];
+    let mut spans: Vec<Span<'static>> = vec![];
+    let mut stack: Vec<Style> = vec![];
+    let mut style = Style::default();
+    let flush = flush_line;
+    let mut list_depth = 0usize;
+    let mut ordered_next = 0usize;
+
+    for ev in Parser::new(text) {
+        match ev {
+            Event::Start(Tag::Heading { level, .. }) => {
+                flush(&mut lines, &mut spans);
+                let color = match level {
+                    HeadingLevel::H1 => ACCENT,
+                    HeadingLevel::H2 => WARN,
+                    _ => Color::White,
+                };
+                stack.push(style);
+                style = style.add_modifier(Modifier::BOLD).fg(color);
+                spans.push(Span::styled(
+                    format!("{} ", "#".repeat(level as usize)),
+                    style,
+                ));
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                flush(&mut lines, &mut spans);
+                style = stack.pop().unwrap_or_default();
+            }
+            Event::Start(Tag::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => flush(&mut lines, &mut spans),
+            Event::Start(Tag::Emphasis) => {
+                stack.push(style);
+                style = style.add_modifier(Modifier::ITALIC);
+            }
+            Event::End(TagEnd::Emphasis)
+            | Event::End(TagEnd::Strong)
+            | Event::End(TagEnd::Link)
+            | Event::End(TagEnd::Image) => {
+                style = stack.pop().unwrap_or_default();
+            }
+            Event::Start(Tag::Strong) => {
+                stack.push(style);
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            Event::Start(Tag::Link { .. }) | Event::Start(Tag::Image { .. }) => {
+                stack.push(style);
+                style = style.fg(ACCENT).add_modifier(Modifier::UNDERLINED);
+            }
+            Event::Start(Tag::CodeBlock(_)) => {
+                stack.push(style);
+                style = style.fg(Color::Green);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                style = stack.pop().unwrap_or_default();
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                stack.push(style);
+                style = style.fg(Color::DarkGray);
+                spans.push(Span::styled("│ ", style));
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                style = stack.pop().unwrap_or_default();
+            }
+            Event::Start(Tag::List(first)) => {
+                list_depth += 1;
+                ordered_next = first.map(|f| f as usize).unwrap_or(0);
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_depth = list_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) => {
+                let indent = "  ".repeat(list_depth.saturating_sub(1));
+                let bullet = if ordered_next > 0 {
+                    let b = format!("{ordered_next}. ");
+                    ordered_next += 1;
+                    b
+                } else {
+                    "- ".to_string()
+                };
+                spans.push(Span::raw(format!("{indent}{bullet}")));
+            }
+            Event::End(TagEnd::Item) => flush(&mut lines, &mut spans),
+            Event::Text(t) => spans.push(Span::styled(t.to_string(), style)),
+            Event::Code(t) => spans.push(Span::styled(
+                format!(" {t} "),
+                Style::default().fg(Color::Yellow).bg(Color::Indexed(235)),
+            )),
+            Event::SoftBreak => spans.push(Span::raw(" ")),
+            Event::HardBreak => flush(&mut lines, &mut spans),
+            Event::Rule => {
+                flush(&mut lines, &mut spans);
+                lines.push(Line::from(Span::styled(
+                    "─".repeat(30),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            _ => {}
+        }
+    }
+    if !spans.is_empty() {
+        lines.push(spans.into());
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(""));
+    }
+    lines
+}
+
+fn flush_line(lines: &mut Vec<Line<'static>>, spans: &mut Vec<Span<'static>>) {
+    lines.push(std::mem::take(spans).into());
 }

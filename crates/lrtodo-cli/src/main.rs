@@ -172,7 +172,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let cfg = Config::load(cli.config.as_deref())?;
     let data_dir = cfg.data_dir(cli.data_dir.as_deref());
     // Sin subcomando: en una terminal abre la TUI; en un pipe, lista como antes.
-    let cmd = cli.cmd.unwrap_or_else(|| {
+    let mut cmd = cli.cmd.unwrap_or_else(|| {
         if std::io::stdout().is_terminal() {
             Cmd::Tui
         } else {
@@ -201,6 +201,31 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         None => local.insert(Local::open(data_dir, cfg.versioning.unwrap_or_default())?),
     };
     let default_list = cfg.default_list.clone();
+
+    // Los ids de lista también aceptan el nombre ("Tareas de Zyte" → su id).
+    match &mut cmd {
+        Cmd::Add { list, .. }
+        | Cmd::Link { list, .. }
+        | Cmd::Unlink { list, .. }
+        | Cmd::Done { list, .. }
+        | Cmd::Undo { list, .. }
+        | Cmd::Rm { list, .. }
+        | Cmd::Set { list, .. }
+        | Cmd::Edit { list } => *list = resolve_list(backend, list)?,
+        Cmd::Mv { list, to, .. } => {
+            *list = resolve_list(backend, list)?;
+            *to = resolve_list(backend, to)?;
+        }
+        Cmd::Ls { list, .. } => {
+            if let Some(l) = list.as_mut() {
+                *l = resolve_list(backend, l)?;
+            }
+        }
+        Cmd::RmList { id } | Cmd::Convert { id, .. } => {
+            *id = resolve_list(backend, id)?;
+        }
+        _ => {}
+    }
 
     match cmd {
         Cmd::Serve { .. } | Cmd::Tui => unreachable!(),
@@ -406,11 +431,31 @@ fn parse_kind(s: &str) -> anyhow::Result<lrtodo_core::LinkKind> {
     }
 }
 
+/// Una lista por id **o por nombre** (el nombre puede tener espacios/mayúsculas).
+/// Si el arg es un id válido se usa tal cual; si no, se busca por nombre
+/// (case-insensitive) entre las listas existentes.
+fn resolve_list(backend: &mut dyn Backend, arg: &str) -> anyhow::Result<String> {
+    if lrtodo_store::validate_id(arg).is_ok() {
+        return Ok(arg.into());
+    }
+    let needle = arg.to_lowercase();
+    let rows = backend.lists()?;
+    rows.iter()
+        .find(|r| {
+            r.info.meta.name.to_lowercase() == needle || r.info.meta.id.to_lowercase() == needle
+        })
+        .map(|r| r.info.meta.id.clone())
+        .with_context(|| {
+            format!("lista desconocida: {arg:?} (los ids/nombres salen con `lrtodo lists`)")
+        })
+}
+
 /// Destino de un link: `tarea` en la misma lista u `otra-lista/tarea`.
 fn resolve_dst(backend: &mut dyn Backend, list: &str, dst: &str) -> anyhow::Result<String> {
     match dst.split_once('/') {
         Some((other, r)) => {
-            let id = resolve(&backend.tasks(other)?, r)?;
+            let other = resolve_list(backend, other)?;
+            let id = resolve(&backend.tasks(&other)?, r)?;
             Ok(format!("{other}/{id}"))
         }
         None => resolve(&backend.tasks(list)?, dst),

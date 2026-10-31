@@ -15,7 +15,7 @@ use lrtodo_store::Layout;
 
 /// Tareas en YAML editable a mano, offline-first, con PWA y Home Assistant.
 #[derive(Parser)]
-#[command(name = "lrtodo", version)]
+#[command(name = "lrtodo", version = env!("LRTODO_VERSION"))]
 struct Cli {
     /// Archivo de configuración (por defecto ~/.config/lrtodo/config.yaml).
     #[arg(long, global = true, env = "LRTODO_CONFIG")]

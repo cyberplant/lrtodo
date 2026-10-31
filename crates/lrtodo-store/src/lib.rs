@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lrtodo_core::{Caps, Clock, ListDoc, ListKind, ListMeta, Rng, Task};
+use lrtodo_core::{Caps, Change, Clock, LinkKind, ListDoc, ListKind, ListMeta, OpKind, Rng, Task};
 use serde::{Deserialize, Serialize};
 
 pub use atomic::write_atomic;
@@ -126,6 +126,9 @@ pub struct Store {
     rng: Mutex<Rng>,
     /// Versionado git opcional: autocommit tras cada `save`.
     versioned: bool,
+    /// Descripción de la próxima mutación para el mensaje de commit
+    /// (la setea el caller antes de `mutate`/`save`; se consume al commitear).
+    pending_desc: Mutex<Option<String>>,
 }
 
 pub fn now_ms() -> u64 {
@@ -163,7 +166,13 @@ impl Store {
             clock: Mutex::new(Clock::new(node)),
             rng: Mutex::new(Rng::new(seed)),
             versioned: false,
+            pending_desc: Mutex::new(None),
         })
+    }
+
+    /// Descripción para el próximo commit git (consumida por `git_commit`).
+    pub fn set_commit_desc(&self, desc: impl Into<String>) {
+        *self.pending_desc.lock().expect("pending_desc") = Some(desc.into());
     }
 
     /// Activa el versionado git: inicializa el repo si no existe
@@ -191,7 +200,12 @@ impl Store {
                 .unwrap_or(false)
         };
         git(&["add", "-A"]);
-        let msg = format!("lrtodo: {list}");
+        let msg = self
+            .pending_desc
+            .lock()
+            .expect("pending_desc")
+            .take()
+            .unwrap_or_else(|| format!("lrtodo: {list}"));
         git(&["commit", "-qm", &msg]);
     }
 
@@ -289,6 +303,8 @@ impl Store {
             extra: BTreeMap::new(),
         };
         self.write_source(id, layout, &header, &[])?;
+        self.set_commit_desc(format!("{id}: creamos la lista"));
+        self.git_commit(id);
         Ok(meta(id, &header))
     }
 
@@ -337,6 +353,8 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(io_err(&state)(e)),
         }
+        self.set_commit_desc(format!("{id}: eliminamos la lista"));
+        self.git_commit(id);
         Ok(())
     }
 
@@ -350,6 +368,7 @@ impl Store {
         }
         let old = loaded.layout;
         loaded.layout = layout;
+        self.set_commit_desc(format!("{id}: convertimos el layout"));
         self.save(id, &loaded)?;
         match old {
             Layout::File => {
@@ -696,4 +715,48 @@ fn ensure_git(root: &Path) -> std::io::Result<()> {
         .args(["commit", "-qm", "lrtodo: init"])
         .status();
     Ok(())
+}
+
+/// Describe una op para el mensaje de commit git ("lista: agregamos tarea «x»").
+pub fn describe_op(list: &str, kind: &OpKind, doc: &ListDoc) -> String {
+    let title_of = |id: &str| -> String {
+        doc.tasks
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| format!("«{}»", t.title))
+            .unwrap_or_else(|| id.to_string())
+    };
+    match kind {
+        OpKind::Add { task } => format!("{list}: agregamos tarea «{}»", task.title),
+        OpKind::Delete { id } => format!("{list}: eliminamos tarea {}", title_of(id)),
+        OpKind::Set { id, change } => {
+            let t = title_of(id);
+            let accion = match change {
+                Change::Done(true) => "completamos",
+                Change::Done(false) => "reabrimos",
+                Change::Title(_) => "renombramos",
+                Change::Due(_) => "cambiamos el vencimiento de",
+                Change::Notes(_) => "editamos las notas de",
+                Change::Tags(_) => "cambiamos los tags de",
+                Change::Priority(_) => "cambiamos la prioridad de",
+            };
+            format!("{list}: {accion} tarea {t}")
+        }
+        OpKind::Link { src, dst, kind } => {
+            let rel = match kind {
+                LinkKind::Subtask => "es subtarea de",
+                LinkKind::Blocks => "bloquea a",
+                LinkKind::Related => "se relaciona con",
+            };
+            format!("{list}: {} {rel} «{dst}»", title_of(src))
+        }
+        OpKind::Unlink { src, dst, kind } => {
+            let rel = match kind {
+                LinkKind::Subtask => "deja de ser subtarea de",
+                LinkKind::Blocks => "deja de bloquear a",
+                LinkKind::Related => "deja de relacionarse con",
+            };
+            format!("{list}: {} {rel} «{dst}»", title_of(src))
+        }
+    }
 }

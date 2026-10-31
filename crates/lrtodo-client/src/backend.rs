@@ -126,6 +126,8 @@ impl Local {
                 hlc: clock.tick(now),
                 kind: kind(rng),
             };
+            self.store
+                .set_commit_desc(lrtodo_store::describe_op(list, &op.kind, &l.doc));
             let caps = l.meta.caps;
             l.doc.apply(&op, &caps)
         })?;

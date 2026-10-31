@@ -26,10 +26,19 @@ pub enum Focus {
 
 pub enum Mode {
     Normal,
-    /// Prompt de una línea (agregar tarea, nueva lista, filtro).
+    /// Prompt de una línea (agregar tarea, filtro, confirmación tipeada).
     Input {
         kind: InputKind,
         buf: Line,
+    },
+    /// Nueva lista: nombre + id que se autocompleta hasta tocarlo a mano.
+    NewList {
+        name: Line,
+        id: Line,
+        /// 0 = nombre, 1 = id.
+        focus: usize,
+        /// true cuando el usuario editó el id: se apaga el autocompletado.
+        id_dirty: bool,
     },
     /// Formulario de edición de una tarea.
     Form {
@@ -79,7 +88,6 @@ pub enum PickNext {
 #[derive(Clone)]
 pub enum InputKind {
     AddTask,
-    NewList,
     Filter,
     /// Borrar una lista: hay que tipear el id para confirmar.
     DeleteList(String),
@@ -399,6 +407,7 @@ impl App {
         match &mut self.mode {
             Mode::Normal => self.key_normal(key),
             Mode::Input { .. } => self.key_input(key),
+            Mode::NewList { .. } => self.key_newlist(key),
             Mode::Form { .. } => self.key_form(key),
             Mode::Confirm { .. } => self.key_confirm(key),
             Mode::Pick { .. } => self.key_pick(key),
@@ -445,16 +454,20 @@ impl App {
                     };
                 }
                 Focus::Lists => {
-                    self.mode = Mode::Input {
-                        kind: InputKind::NewList,
-                        buf: Line::new(""),
-                    };
+                    self.mode = Mode::NewList {
+                        name: Line::new(""),
+                        id: Line::new(""),
+                        focus: 0,
+                        id_dirty: false,
+                    }
                 }
             },
             KeyCode::Char('n') => {
-                self.mode = Mode::Input {
-                    kind: InputKind::NewList,
-                    buf: Line::new(""),
+                self.mode = Mode::NewList {
+                    name: Line::new(""),
+                    id: Line::new(""),
+                    focus: 0,
+                    id_dirty: false,
                 };
             }
             KeyCode::Char('D') if self.focus == Focus::Lists => {
@@ -528,6 +541,64 @@ impl App {
         }
     }
 
+    /// Nueva lista: nombre + id. El id se autocompleta del nombre
+    /// (minúsculas, espacios→`_`) hasta que se edita a mano.
+    fn key_newlist(&mut self, key: KeyEvent) {
+        let Mode::NewList {
+            name,
+            id,
+            focus,
+            id_dirty,
+        } = &mut self.mode
+        else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Down | KeyCode::Up => {
+                *focus = 1 - *focus;
+            }
+            KeyCode::Enter => {
+                let id_text = id.text().trim().to_string();
+                let name_text = name.text().trim().to_string();
+                self.mode = Mode::Normal;
+                self.submit_newlist(name_text, id_text);
+            }
+            _ => {
+                let buf = if *focus == 0 { &mut *name } else { &mut *id };
+                if buf.key(&key) {
+                    if *focus == 0 && !*id_dirty {
+                        // Autocompletar el id mientras no se haya tocado a mano.
+                        let slug = id_slug(&buf.text());
+                        *id = Line::new(slug);
+                    } else if *focus == 1 {
+                        *id_dirty = true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn submit_newlist(&mut self, name: String, id: String) {
+        if id.is_empty() {
+            return;
+        }
+        let name = (!name.is_empty()).then_some(name);
+        match self
+            .chan
+            .create_list(&id, name.as_deref(), lrtodo_store::Layout::File)
+        {
+            Ok(()) => {
+                self.refresh_lists();
+                if let Some(i) = self.lists.iter().position(|r| r.info.meta.id == id) {
+                    self.sel_list = i;
+                    self.refresh_tasks();
+                }
+            }
+            Err(e) => self.flash_err("crear lista", e),
+        }
+    }
+
     fn key_input(&mut self, key: KeyEvent) {
         let Mode::Input { kind, buf } = &mut self.mode else {
             return;
@@ -569,25 +640,7 @@ impl App {
                     }
                 }
             }
-            InputKind::NewList => {
-                let (id, name) = match text.split_once('|') {
-                    Some((i, n)) => (i.trim(), Some(n.trim())),
-                    None => (text.trim(), None),
-                };
-                if id.is_empty() {
-                    return;
-                }
-                match self.chan.create_list(id, name, lrtodo_store::Layout::File) {
-                    Ok(()) => {
-                        self.refresh_lists();
-                        if let Some(i) = self.lists.iter().position(|r| r.info.meta.id == id) {
-                            self.sel_list = i;
-                            self.refresh_tasks();
-                        }
-                    }
-                    Err(e) => self.flash_err("crear lista", e),
-                }
-            }
+
             InputKind::Filter => self.filter = text.trim().to_string(),
             InputKind::DeleteList(id) => {
                 if text.trim() != id {
@@ -1027,4 +1080,20 @@ impl App {
             self.refresh_all();
         }
     }
+}
+
+/// Id sugerido para una lista: minúsculas, espacios/no-alfanumérico → `_`.
+fn id_slug(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut last_us = true; // evita `_` inicial
+    for c in name.chars().flat_map(|c| c.to_lowercase()) {
+        if c.is_alphanumeric() || c == '-' {
+            slug.push(c);
+            last_us = false;
+        } else if !last_us {
+            slug.push('_');
+            last_us = true;
+        }
+    }
+    slug.trim_end_matches('_').to_string()
 }

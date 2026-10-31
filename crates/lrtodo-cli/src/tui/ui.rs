@@ -42,18 +42,34 @@ fn border(focused: bool) -> Style {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let chunks = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Min(3),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(area);
-    let main = Layout::horizontal([Constraint::Length(28), Constraint::Min(20)]).split(chunks[0]);
+    // Línea superior: nombre + versión derivada de git.
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " lrtodo",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {}", env!("LRTODO_VERSION")),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])),
+        chunks[0],
+    );
+    let main = Layout::horizontal([Constraint::Length(28), Constraint::Min(20)]).split(chunks[1]);
     draw_lists(f, app, main[0]);
     draw_tasks(f, app, main[1]);
-    draw_status(f, app, chunks[1]);
-    draw_keys(f, app, chunks[2]);
+    draw_status(f, app, chunks[2]);
+    draw_keys(f, app, chunks[3]);
     match &app.mode {
         Mode::Input { .. } => draw_input(f, app, area),
+        Mode::NewList { .. } => draw_newlist(f, app, area),
         Mode::Form { .. } => draw_form(f, app, area),
         Mode::Confirm { .. } => draw_confirm(f, app, area),
         Mode::Pick { .. } => draw_pick(f, app, area),
@@ -286,6 +302,7 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
             }
         },
         Mode::Input { .. } => " enter aceptar · esc cancelar",
+        Mode::NewList { .. } => " tab/↑/↓ campo · enter crear · esc cancelar",
         Mode::Form { .. } => " tab/↑/↓ campo · enter guardar · esc cancelar",
         Mode::Confirm { .. } => " s confirmar · cualquier otra tecla cancela",
         Mode::Pick { .. } => " j/k elegir · enter aceptar · esc cancelar",
@@ -321,13 +338,48 @@ fn popup<'a>(title: &'a str) -> Block<'a> {
         .title(format!(" {title} "))
 }
 
+/// Nueva lista: dos campos (nombre arriba, id autocompletado abajo).
+fn draw_newlist(f: &mut Frame, app: &mut App, area: Rect) {
+    let Mode::NewList {
+        name, id, focus, ..
+    } = &app.mode
+    else {
+        return;
+    };
+    let rect = centered(area, 56, 4);
+    f.render_widget(Clear, rect);
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("nombre: ", Style::default().fg(ACCENT)),
+                Span::raw(name.text()),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "id: ",
+                    Style::default().fg(if *focus == 1 { ACCENT } else { Color::DarkGray }),
+                ),
+                Span::raw(format!("    {}", id.text())),
+            ]),
+        ])
+        .block(popup("Nueva lista")),
+        rect,
+    );
+    // Cursor en el campo activo (borde 1 + label).
+    let (y, label_w, buf) = if *focus == 0 {
+        (rect.y + 1, 8u16, name)
+    } else {
+        (rect.y + 2, 8u16, id)
+    };
+    f.set_cursor_position((rect.x + 1 + label_w + buf.pos as u16, y));
+}
+
 fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
     let Mode::Input { kind, buf } = &app.mode else {
         return;
     };
     let (title, prompt) = match kind {
         InputKind::AddTask => ("Agregar tarea", "tarea".to_string()),
-        InputKind::NewList => ("Nueva lista", "id|nombre".to_string()),
         InputKind::Filter => ("Filtrar", "texto".to_string()),
         InputKind::DeleteList(id) => ("Borrar lista", format!("escribí «{id}»")),
     };

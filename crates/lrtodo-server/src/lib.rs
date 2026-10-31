@@ -248,6 +248,15 @@ pub async fn handle_sync(app: &Arc<App>, req: SyncRequest) -> anyhow::Result<Syn
             store
                 .mutate(&id, |l| {
                     let caps = l.meta.caps;
+                    if ops2.len() == 1 {
+                        store.set_commit_desc(lrtodo_store::describe_op(
+                            &id,
+                            &ops2[0].kind,
+                            &l.doc,
+                        ));
+                    } else if !ops2.is_empty() {
+                        store.set_commit_desc(format!("{id}: {} cambios", ops2.len()));
+                    }
                     l.doc.apply_batch(&ops2, &caps, &mut a, &mut r)
                 })
                 .map(|(_, changed)| (changed, a, r))

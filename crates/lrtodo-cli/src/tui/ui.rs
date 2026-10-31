@@ -410,7 +410,7 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         rect,
     );
     // Borde (1) + "prompt: " + posición dentro del texto, menos el scroll.
-    let x = rect.x + 3 + (prompt_w + buf.pos) as u16 - offset as u16;
+    let x = rect.x + 1 + (prompt_w + buf.pos) as u16 - offset as u16;
     f.set_cursor_position((x.min(rect.x + rect.width - 2), rect.y + 1));
 }
 

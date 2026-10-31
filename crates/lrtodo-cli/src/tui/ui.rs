@@ -384,7 +384,14 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         InputKind::DeleteList(id) => ("Borrar lista", format!("escribí «{id}»")),
     };
     let danger = matches!(kind, InputKind::DeleteList(_));
-    let rect = centered(area, 56, 3);
+    // Ancho según el contenido (hasta ~80% de la terminal) y scroll
+    // horizontal si el texto es más largo que el popup.
+    let prompt_w = prompt.chars().count() + 2; // "prompt: "
+    let text_w = prompt_w + buf.chars.len();
+    let w = (text_w as u16 + 3).clamp(40, area.width.saturating_sub(4).max(40));
+    let rect = centered(area, w, 3);
+    let inner_w = rect.width.saturating_sub(3) as usize; // borde + margen
+    let offset = (prompt_w + buf.pos).saturating_sub(inner_w);
     f.render_widget(Clear, rect);
     let mut block = popup(title);
     if danger {
@@ -398,11 +405,12 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
             ),
             Span::raw(buf.text()),
         ]))
-        .block(block),
+        .block(block)
+        .scroll((0, offset as u16)),
         rect,
     );
-    // Borde (1) + "prompt: " + posición dentro del texto.
-    let x = rect.x + 3 + prompt.chars().count() as u16 + buf.pos as u16;
+    // Borde (1) + "prompt: " + posición dentro del texto, menos el scroll.
+    let x = rect.x + 3 + (prompt_w + buf.pos) as u16 - offset as u16;
     f.set_cursor_position((x.min(rect.x + rect.width - 2), rect.y + 1));
 }
 

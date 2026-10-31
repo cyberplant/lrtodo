@@ -12,7 +12,7 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use anyhow::Context;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -32,13 +32,13 @@ struct Restore {
 impl Restore {
     fn leave() -> Self {
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen);
         Self { active: false }
     }
 
     fn enter(&mut self) -> anyhow::Result<()> {
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen)?;
+        execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         self.active = true;
         Ok(())
     }
@@ -47,6 +47,7 @@ impl Restore {
 impl Drop for Restore {
     fn drop(&mut self) {
         if self.active {
+            let _ = execute!(stdout(), DisableMouseCapture);
             let _ = disable_raw_mode();
             let _ = execute!(stdout(), LeaveAlternateScreen);
         }
@@ -78,11 +79,12 @@ pub fn run(backend: Box<dyn Backend + Send>, default_list: Option<String>) -> an
         while let Ok(msg) = ui_rx.try_recv() {
             app.msg(msg);
         }
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            app.key(key);
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => app.key(key),
+                Event::Mouse(ev) => app.mouse(ev),
+                _ => {}
+            }
         }
         if let Some(Effect::Edit { list }) = app.effect.take() {
             edit(&mut restore, &mut term, &mut app, &list);

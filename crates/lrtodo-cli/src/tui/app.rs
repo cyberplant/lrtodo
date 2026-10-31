@@ -3,8 +3,9 @@
 
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use lrtodo_core::{Change, LinkKind, Task, TaskView};
+use ratatui::layout::Rect;
 
 use super::worker::{ChanBackend, Msg};
 use lrtodo_client::{Backend, ListRow, SyncState};
@@ -171,6 +172,11 @@ pub struct App {
     pub flash: Option<(String, Instant)>,
     pub quit: bool,
     pub effect: Option<Effect>,
+    /// Geometría del último dibujado (para hit-testing del mouse).
+    pub lists_area: Rect,
+    pub tasks_area: Rect,
+    pub lists_offset: usize,
+    pub tasks_offset: usize,
     last_sync_seen: Option<u64>,
     poll_in_flight: bool,
 }
@@ -192,6 +198,10 @@ impl App {
             flash: None,
             quit: false,
             effect: None,
+            lists_area: Rect::default(),
+            tasks_area: Rect::default(),
+            lists_offset: 0,
+            tasks_offset: 0,
             last_sync_seen: None,
             poll_in_flight: false,
         };
@@ -907,6 +917,60 @@ impl App {
                     self.refresh_all();
                 }
             }
+        }
+    }
+
+    /// Mouse: click en un panel lo enfoca y selecciona la fila; click sobre
+    /// el `[ ]` tilda; la rueda scrollea el panel bajo el cursor.
+    pub fn mouse(&mut self, ev: MouseEvent) {
+        if !matches!(self.mode, Mode::Normal) {
+            return;
+        }
+        let (x, y) = (ev.column, ev.row);
+        let in_area = |a: Rect| x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height;
+        match ev.kind {
+            MouseEventKind::ScrollUp if in_area(self.tasks_area) => self.move_sel(-3),
+            MouseEventKind::ScrollDown if in_area(self.tasks_area) => self.move_sel(3),
+            MouseEventKind::ScrollUp if in_area(self.lists_area) => {
+                self.focus = Focus::Lists;
+                self.move_sel(-1);
+            }
+            MouseEventKind::ScrollDown if in_area(self.lists_area) => {
+                self.focus = Focus::Lists;
+                self.move_sel(1);
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_area(self.lists_area) => {
+                self.focus = Focus::Lists;
+                let row = self
+                    .lists_offset
+                    .saturating_add((y - self.lists_area.y - 1) as usize);
+                if row < self.lists.len() {
+                    self.sel_list = row;
+                    self.refresh_tasks();
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_area(self.tasks_area) => {
+                self.focus = Focus::Tasks;
+                let row = self
+                    .tasks_offset
+                    .saturating_add((y - self.tasks_area.y - 1) as usize);
+                let id = {
+                    let v = self.visible();
+                    match v.get(row) {
+                        Some(tv) => tv.task.id.clone(),
+                        None => return,
+                    }
+                };
+                self.sel_task = row;
+                // ¿Sobre el casillero? Borde (1) + árbol (3 por guía) + "[ ]".
+                let children = self.children_map();
+                let guides = self.tree_guides(&children, &id);
+                let check_x = self.tasks_area.x + 1 + guides.len() as u16 * 3;
+                if x >= check_x && x < check_x + 4 {
+                    self.toggle();
+                }
+            }
+            _ => {}
         }
     }
 

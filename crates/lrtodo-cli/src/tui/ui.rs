@@ -64,7 +64,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 // ---------------------------------------------------------------- paneles
 
-fn draw_lists(f: &mut Frame, app: &App, area: Rect) {
+fn draw_lists(f: &mut Frame, app: &mut App, area: Rect) {
+    app.lists_area = area;
     let items: Vec<ListItem> = app
         .lists
         .iter()
@@ -105,9 +106,11 @@ fn draw_lists(f: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.sel_list));
     }
     f.render_stateful_widget(list, area, &mut state);
+    app.lists_offset = state.offset();
 }
 
-fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
+fn draw_tasks(f: &mut Frame, app: &mut App, area: Rect) {
+    app.tasks_area = area;
     let visible = app.visible();
     let open = visible.iter().filter(|t| !t.task.done).count();
     let name = app
@@ -141,6 +144,7 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.sel_task.min(visible.len() - 1)));
     }
     f.render_stateful_widget(list, area, &mut state);
+    app.tasks_offset = state.offset();
 }
 
 fn task_line(tv: &TaskView, guides: &[bool]) -> Line<'static> {

@@ -35,8 +35,11 @@ pub fn expand(p: &str) -> PathBuf {
 }
 
 pub fn default_path() -> PathBuf {
-    dirs::config_dir()
+    // `~/.config/lrtodo/config.yaml` en todas las plataformas (XDG; en macOS
+    // dirs::config_dir() sería Library/Application Support, no es lo esperado).
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
         .join("lrtodo")
         .join("config.yaml")
 }

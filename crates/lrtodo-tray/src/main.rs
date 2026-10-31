@@ -36,6 +36,8 @@ struct Args {
 /// Acciones que la UI le manda al worker.
 enum Work {
     Toggle { list: String, task: String },
+    AddTask { list: String },
+    NewList,
     Sync,
     Quit,
 }
@@ -104,6 +106,12 @@ fn main() -> Result<()> {
             } else if id == "quit" {
                 let _ = tx.send(Work::Quit);
                 *flow = ControlFlow::Exit;
+            } else if id == "addlist" {
+                let _ = tx.send(Work::NewList);
+            } else if let Some(list) = id.strip_prefix("a:") {
+                let _ = tx.send(Work::AddTask {
+                    list: list.to_string(),
+                });
             } else if let Some((list, task)) = id.strip_prefix("t:").and_then(|s| s.split_once('/'))
             {
                 let _ = tx.send(Work::Toggle {
@@ -131,6 +139,12 @@ fn worker(
                 {
                     let _ = backend.set(&list, &task, Change::Done(!t.task.done));
                 }
+            }
+            Ok(Work::AddTask { list }) => {
+                let _ = add_task_flow(&mut *backend, &list);
+            }
+            Ok(Work::NewList) => {
+                let _ = new_list_flow(&mut *backend);
             }
             Ok(Work::Sync) | Err(RecvTimeoutError::Timeout) => {
                 let _ = backend.poll();
@@ -207,6 +221,15 @@ fn build_menu(m: &MenuModel) -> Menu {
     for l in &m.lists {
         let open = l.tasks.iter().filter(|t| !t.done).count();
         let sub = Submenu::new(format!("{} ({open})", l.name), true);
+        let _ = sub.append(&MenuItem::with_id(
+            MenuId::from(format!("a:{}", l.id)),
+            "+ Agregar…",
+            true,
+            None,
+        ));
+        if !l.tasks.is_empty() {
+            let _ = sub.append(&PredefinedMenuItem::separator());
+        }
         for t in &l.tasks {
             let label = format!("{}{}", "  ".repeat(t.depth), t.title);
             let item = CheckMenuItem::with_id(
@@ -225,6 +248,12 @@ fn build_menu(m: &MenuModel) -> Menu {
     }
     let _ = menu.append(&PredefinedMenuItem::separator());
     let _ = menu.append(&MenuItem::with_id(
+        MenuId::from("addlist"),
+        "+ Nueva lista…",
+        true,
+        None,
+    ));
+    let _ = menu.append(&MenuItem::with_id(
         MenuId::from("sync"),
         "↻ Sincronizar",
         true,
@@ -238,6 +267,121 @@ fn build_menu(m: &MenuModel) -> Menu {
         None,
     ));
     menu
+}
+
+// ---------------------------------------------------------- diálogos macOS
+
+/// Corre un AppleScript y devuelve stdout (None si canceló/falló).
+#[cfg(target_os = "macos")]
+fn osascript(script: &str) -> Option<String> {
+    let out = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn osascript(_: &str) -> Option<String> {
+    None
+}
+
+fn esc(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// `display dialog` con campo de texto.
+fn ask_text(prompt: &str) -> Option<String> {
+    let r = osascript(&format!(
+        "set r to display dialog \"{}\" default answer \"\" buttons {{\"Cancelar\",\"OK\"}} default button \"OK\" with title \"lrtodo\"\ntext returned of r",
+        esc(prompt)
+    ))?;
+    Some(r.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// `choose from list` → la opción elegida (None si canceló).
+fn choose(prompt: &str, items: &[String]) -> Option<String> {
+    let items = items
+        .iter()
+        .map(|i| format!("\"{}\"", esc(i)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let r = osascript(&format!(
+        "choose from list {{{items}}} with prompt \"{}\"",
+        esc(prompt)
+    ))?;
+    (r != "false").then_some(r)
+}
+
+/// Agregar tarea con diálogo nativo: título → ¿linkear? (opcional) → destino.
+fn add_task_flow(backend: &mut dyn Backend, list: &str) -> Result<()> {
+    let name = backend
+        .lists()?
+        .iter()
+        .find(|r| r.info.meta.id == list)
+        .map(|r| r.info.meta.name.clone())
+        .unwrap_or_else(|| list.to_string());
+    let Some(title) = ask_text(&format!("Tarea para «{name}»:")) else {
+        return Ok(());
+    };
+    let id = backend.add(
+        list,
+        lrtodo_core::Task {
+            title,
+            ..Default::default()
+        },
+    )?;
+    // Vínculo opcional.
+    let kinds = ["—", "subtarea de…", "bloquea a…", "relacionada con…"];
+    let Some(kind) = choose("¿Linkearla como…?", &kinds.map(String::from)) else {
+        return Ok(());
+    };
+    let kind = match kind.as_str() {
+        "subtarea de…" => LinkKind::Subtask,
+        "bloquea a…" => LinkKind::Blocks,
+        "relacionada con…" => LinkKind::Related,
+        _ => return Ok(()),
+    };
+    let tasks = backend.tasks(list)?;
+    let mut opts: Vec<String> = vec![];
+    let mut ids: Vec<String> = vec![];
+    for t in &tasks {
+        if t.task.id == id {
+            continue;
+        }
+        let mut label = t.task.title.clone();
+        if opts.contains(&label) {
+            label = format!("{} ({})", label, &t.task.id[..4.min(t.task.id.len())]);
+        }
+        opts.push(label);
+        ids.push(t.task.id.clone());
+    }
+    if opts.is_empty() {
+        return Ok(());
+    }
+    if let Some(dst) = choose("destino:", &opts)
+        && let Some(i) = opts.iter().position(|o| o == &dst)
+    {
+        let _ = backend.link(list, &id, &ids[i], kind);
+    }
+    Ok(())
+}
+
+/// Nueva lista con diálogo nativo (`id|nombre`).
+fn new_list_flow(backend: &mut dyn Backend) -> Result<()> {
+    let Some(input) = ask_text("Nueva lista (id|nombre):") else {
+        return Ok(());
+    };
+    let (id, name) = input
+        .split_once('|')
+        .map(|(a, b)| (a.trim(), Some(b.trim()).filter(|s| !s.is_empty())))
+        .unwrap_or((input.trim(), None));
+    if id.is_empty() {
+        return Ok(());
+    }
+    backend.create_list(id, name, lrtodo_store::Layout::File)
 }
 
 /// Casillero con tilde: 22x22 RGBA (blanco opaco = ícono template).

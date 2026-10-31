@@ -417,12 +417,22 @@ impl App {
                 Focus::Lists => self.focus = Focus::Tasks,
                 Focus::Tasks => self.toggle(),
             },
-            KeyCode::Char('a') => {
-                self.mode = Mode::Input {
-                    kind: InputKind::AddTask,
-                    buf: Line::new(""),
-                };
-            }
+            // `a` agrega al final / `i` inserta: agregar tarea o lista según
+            // el panel enfocado (la inserción en posición espera orden manual).
+            KeyCode::Char('a' | 'i') => match self.focus {
+                Focus::Tasks => {
+                    self.mode = Mode::Input {
+                        kind: InputKind::AddTask,
+                        buf: Line::new(""),
+                    };
+                }
+                Focus::Lists => {
+                    self.mode = Mode::Input {
+                        kind: InputKind::NewList,
+                        buf: Line::new(""),
+                    };
+                }
+            },
             KeyCode::Char('n') => {
                 self.mode = Mode::Input {
                     kind: InputKind::NewList,

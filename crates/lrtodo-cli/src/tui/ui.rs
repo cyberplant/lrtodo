@@ -16,6 +16,13 @@ const ACCENT: Color = Color::Cyan;
 const WARN: Color = Color::Yellow;
 const ERR: Color = Color::Red;
 const OK: Color = Color::Green;
+/// Fondos por panel: el enfocado un gris apenas más claro, el otro más tenue.
+const FOCUS_BG: Color = Color::Indexed(236);
+const BLUR_BG: Color = Color::Indexed(233);
+
+fn bg(focused: bool) -> Color {
+    if focused { FOCUS_BG } else { BLUR_BG }
+}
 
 fn sel_style() -> Style {
     Style::default()
@@ -89,6 +96,7 @@ fn draw_lists(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(border(app.focus == Focus::Lists))
+                .style(Style::default().bg(bg(app.focus == Focus::Lists)))
                 .title(title),
         )
         .highlight_style(sel_style());
@@ -124,6 +132,7 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(border(app.focus == Focus::Tasks))
+                .style(Style::default().bg(bg(app.focus == Focus::Tasks)))
                 .title(title),
         )
         .highlight_style(sel_style());
@@ -265,10 +274,10 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
     let hint = match &app.mode {
         Mode::Normal => match app.focus {
             Focus::Lists => {
-                " j/k lista · enter ir a tareas · n nueva · D borrar · ? ayuda · q salir"
+                " j/k lista · enter ir a tareas · a/i nueva · D borrar · ? ayuda · q salir"
             }
             Focus::Tasks => {
-                " espacio tildar · a agregar · e editar · d borrar · m mover · L link · U unlink · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"
+                " espacio tildar · a/i agregar · e editar · d borrar · m mover · L link · U unlink · / filtrar · v hechas · E editor · r sync · ? ayuda · q salir"
             }
         },
         Mode::Input { .. } => " enter aceptar · esc cancelar",
@@ -420,7 +429,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ("tab · h · l", "cambiar de panel"),
         ("enter", "en listas: ir a tareas · en tareas: tildar"),
         ("espacio", "tildar la tarea"),
-        ("a", "agregar tarea"),
+        ("a / i", "agregar (tarea o lista, según el panel)"),
         ("e", "editar tarea (formulario)"),
         ("d", "borrar tarea (pide confirmación)"),
         ("m", "mover a otra lista"),

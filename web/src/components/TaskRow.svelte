@@ -40,6 +40,33 @@
     linkTo = '';
   }
 
+  /// Markdown → HTML: los `src` relativos (adjuntos del data_dir) se
+  /// sirven por `api/files/`.
+  function renderMd(md: string): string {
+    const html = marked.parse(md) as string;
+    return html.replace(/src="(?!https?:|data:|\/)/g, 'src="api/files/');
+  }
+
+  /// Pega una imagen del clipboard en las notas: sube el archivo a
+  /// `.assets/` e inserta `![x](ruta)` donde estaba el cursor.
+  let ta: HTMLTextAreaElement;
+  let uploading = $state(false);
+  async function onPaste(e: ClipboardEvent) {
+    const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    uploading = true;
+    try {
+      const rel = await app.uploadAsset(list.meta.id, task.id, file);
+      const pos = ta?.selectionStart ?? notes.length;
+      notes = `${notes.slice(0, pos)}\n\n![img](${rel})\n` + notes.slice(pos);
+    } catch (err) {
+      alert(`adjunto: ${err}`);
+    } finally {
+      uploading = false;
+    }
+  }
+
   async function save(e: Event) {
     e.preventDefault();
     const id = list.meta.id;
@@ -85,9 +112,16 @@
         <label>Vence <input type="date" bind:value={due} /></label>
       {/if}
       {#if caps.notes}
-        <textarea bind:value={notes} placeholder="Notas (markdown)" rows="4"></textarea>
+        <textarea
+          bind:this={ta}
+          bind:value={notes}
+          placeholder="Notas (markdown — podés pegar imágenes)"
+          rows="4"
+          onpaste={onPaste}
+        ></textarea>
+        {#if uploading}<span class="notes">subiendo imagen…</span>{/if}
         {#if notes.trim()}
-          <div class="md-preview">{@html marked.parse(notes)}</div>
+          <div class="md-preview">{@html renderMd(notes)}</div>
         {/if}
       {/if}
       {#if caps.tags}

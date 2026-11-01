@@ -207,6 +207,20 @@ class AppState {
     await this.sync();
   }
 
+  /// Sube un adjunto (imagen pegada, etc.) y devuelve su ruta relativa
+  /// al data_dir (`lista/NNNN-slug.assets/img.png`).
+  async uploadAsset(list: string, task: string, file: File): Promise<string> {
+    const name = encodeURIComponent(file.name || 'img.png');
+    const resp = await this.fetch(`api/lists/${list}/tasks/${task}/assets?name=${name}`, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const { path } = await resp.json();
+    return path as string;
+  }
+
   // ------------------------------------------------------------ sync
 
   private fetch(path: string, init: RequestInit = {}) {

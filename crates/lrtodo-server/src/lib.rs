@@ -102,6 +102,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/sync", post(sync))
         .route("/lists", get(lists).post(create_list))
         .route("/lists/{id}", delete(delete_list))
+        .route("/lists/{id}/tasks/{task}/assets", post(upload_asset))
+        .route("/files/{*path}", get(serve_file))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(app.clone(), auth))
         .route("/health", get(health));
@@ -446,3 +448,50 @@ async fn events(State(app): State<Arc<App>>) -> Sse<impl Stream<Item = Result<Ev
 
 #[cfg(test)]
 mod tests;
+
+/// `POST /api/lists/{id}/tasks/{task}/assets?name=x.png` — guarda el adjunto
+/// en el data_dir (`{id}/NNNN-slug.assets/` o `{id}.assets/`) y devuelve la
+/// ruta relativa para usarla en markdown.
+async fn upload_asset(
+    State(app): State<Arc<App>>,
+    Path((id, task)): Path<(String, String)>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    body: axum::body::Bytes,
+) -> Response {
+    let name = q.get("name").cloned().unwrap_or_else(|| "adjunto".into());
+    let store = app.store.clone();
+    let result =
+        tokio::task::spawn_blocking(move || store.add_asset(&id, &task, &name, &body)).await;
+    match result {
+        Ok(Ok(path)) => {
+            let _ = app.events.send(q.get("list").cloned().unwrap_or_default());
+            Json(serde_json::json!({ "path": path })).into_response()
+        }
+        Ok(Err(e @ StoreError::NotFound(_))) => {
+            (StatusCode::NOT_FOUND, e.to_string()).into_response()
+        }
+        Ok(Err(e)) => AppError(e.into()).into_response(),
+        Err(e) => AppError(e.into()).into_response(),
+    }
+}
+
+/// `GET /api/files/{*path}` — sirve archivos del data_dir (adjuntos, etc.).
+async fn serve_file(State(app): State<Arc<App>>, Path(path): Path<String>) -> Response {
+    // Rechaza `..` y absolutas.
+    if path
+        .split('/')
+        .any(|c| c.is_empty() || c == "." || c == "..")
+    {
+        return (StatusCode::BAD_REQUEST, "path inválido").into_response();
+    }
+    let file = app.store.root().join(&path);
+    match std::fs::read(&file) {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(&file)
+                .first_or_octet_stream()
+                .to_string();
+            ([("content-type", mime)], bytes).into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}

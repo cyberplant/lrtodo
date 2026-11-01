@@ -500,6 +500,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ("d", "borrar tarea (pide confirmación)"),
         ("m", "mover a otra lista"),
         ("n", "crear lista (id|nombre)"),
+        ("p", "pegar imagen como adjunto (pngpaste)"),
         ("/", "filtrar por título o tag"),
         ("v", "mostrar/ocultar completadas"),
         ("E", "abrir la lista en $EDITOR"),

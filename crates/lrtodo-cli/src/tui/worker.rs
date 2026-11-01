@@ -52,6 +52,13 @@ pub enum Call {
     DeleteList {
         id: String,
     },
+    /// Subir un adjunto para una tarea (imagen pegada, etc.).
+    AddAsset {
+        list: String,
+        task: String,
+        name: String,
+        data: Vec<u8>,
+    },
     Link {
         list: String,
         src: String,
@@ -66,6 +73,8 @@ pub enum CallOut {
     Tasks(Vec<TaskView>),
     Caps(Caps),
     Id(TaskId),
+    /// Ruta relativa de un adjunto subido.
+    Path(String),
     Unit,
 }
 
@@ -170,6 +179,12 @@ fn dispatch(b: &mut dyn Backend, call: Call) -> anyhow::Result<CallOut> {
             b.delete_list(&id)?;
             CallOut::Unit
         }
+        Call::AddAsset {
+            list,
+            task,
+            name,
+            data,
+        } => CallOut::Path(b.add_asset(&list, &task, &name, &data)?),
         Call::Link {
             list,
             src,
@@ -354,6 +369,25 @@ impl Backend for ChanBackend {
             unlink: true,
         })?;
         Ok(())
+    }
+
+    fn add_asset(
+        &mut self,
+        list: &str,
+        task_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> anyhow::Result<String> {
+        let out = self.call(Call::AddAsset {
+            list: list.to_string(),
+            task: task_id.to_string(),
+            name: name.to_string(),
+            data: data.to_vec(),
+        })?;
+        match out {
+            CallOut::Path(p) => Ok(p),
+            _ => anyhow::bail!("respuesta inesperada"),
+        }
     }
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {

@@ -308,6 +308,43 @@ impl Store {
         Ok(meta(id, &header))
     }
 
+    /// Directorio de adjuntos de la lista: `<lista>.assets/` al lado del
+    /// archivo o del directorio de la lista.
+    fn assets_root(&self, list: &str) -> PathBuf {
+        self.root.join(format!("{list}.assets"))
+    }
+
+    /// Guarda un adjunto de una tarea (`{task_id}`) y devuelve la ruta
+    /// relativa al data_dir para usarla en markdown:
+    /// `<lista>.assets/NNNN-slug/<archivo>` en file layout,
+    /// `<lista>/NNNN-slug.assets/<archivo>` en dir layout.
+    pub fn add_asset(&self, list: &str, task_id: &str, name: &str, data: &[u8]) -> Result<String> {
+        validate_id(list)?;
+        let loaded = self.read(list)?;
+        let tasks = loaded.doc.tasks_with_links();
+        let (i, task) = tasks
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.id == task_id)
+            .ok_or_else(|| StoreError::NotFound(task_id.into()))?;
+        let stem = task_file_name(i, task).replace(".yaml", "");
+        let file = sanitize_asset_name(name);
+        let (dir, rel) = match loaded.layout {
+            Layout::Dir => (
+                self.dir_path(list).join(format!("{stem}.assets")),
+                format!("{list}/{stem}.assets/{file}"),
+            ),
+            Layout::File => (
+                self.assets_root(list).join(&stem),
+                format!("{list}.assets/{stem}/{file}"),
+            ),
+        };
+        fs::create_dir_all(&dir).map_err(io_err(&dir))?;
+        let path = dir.join(&file);
+        write_atomic(&path, data)?;
+        Ok(rel)
+    }
+
     /// Lee una lista (incorporando ediciones a mano, que se persisten).
     pub fn read(&self, id: &str) -> Result<Loaded> {
         self.mutate(id, |_| ()).map(|(loaded, ())| loaded)
@@ -552,6 +589,13 @@ impl Store {
                     {
                         fs::remove_file(entry.path()).map_err(io_err(&entry.path()))?;
                     }
+                    // Adjuntos huérfanos: `NNNN-slug.assets/` sin su `.yaml`.
+                    if name.ends_with(".assets")
+                        && !wanted
+                            .contains_key(&format!("{}.yaml", name.trim_end_matches(".assets")))
+                    {
+                        let _ = fs::remove_dir_all(entry.path());
+                    }
                 }
                 for (name, task) in &wanted {
                     let path = dir.join(name);
@@ -758,5 +802,19 @@ pub fn describe_op(list: &str, kind: &OpKind, doc: &ListDoc) -> String {
             };
             format!("{list}: {} {rel} «{dst}»", title_of(src))
         }
+    }
+}
+
+/// Nombre de archivo seguro para un adjunto (sin `..` ni separadores).
+fn sanitize_asset_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let clean: String = base
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .collect();
+    if clean.is_empty() {
+        "adjunto".into()
+    } else {
+        clean.trim().to_string()
     }
 }

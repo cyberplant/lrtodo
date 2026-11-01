@@ -71,6 +71,15 @@ pub trait Backend: Send {
     fn link(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()>;
     /// Quita una arista (sin efecto si no existía).
     fn unlink(&mut self, list: &str, src: &str, dst: &str, kind: LinkKind) -> anyhow::Result<()>;
+    /// Guarda un adjunto de la tarea y devuelve la ruta relativa al data
+    /// dir para usarla en markdown (`lista/NNNN-slug.assets/img.png`).
+    fn add_asset(
+        &mut self,
+        list: &str,
+        task_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> anyhow::Result<String>;
     /// Sincroniza (remoto). Devuelve un mensaje de estado para mostrar, si hay.
     fn sync(&mut self) -> anyhow::Result<Option<String>>;
     /// Pull incondicional (la TUI lo llama periódicamente y ante eventos).
@@ -251,6 +260,17 @@ impl Backend for Local {
             dst: dst.into(),
             kind,
         })
+    }
+
+    fn add_asset(
+        &mut self,
+        list: &str,
+        task_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> anyhow::Result<String> {
+        ensure_local(list)?;
+        Ok(self.store.add_asset(list, task_id, name, data)?)
     }
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {
@@ -480,6 +500,37 @@ impl Backend for Remote {
         self.ensure_fresh();
         self.replica.unlink(list, src, dst, kind, now_ms())?;
         self.save()
+    }
+
+    /// Los adjuntos van por HTTP al servidor (no por el outbox: son bytes).
+    fn add_asset(
+        &mut self,
+        list: &str,
+        task_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> anyhow::Result<String> {
+        let url = self.url(&format!(
+            "/api/lists/{list}/tasks/{task_id}/assets?name={name}"
+        ));
+        let http = self.request(self.http.post(url).body(data.to_vec()));
+        let text: serde_json::Value = self
+            .rt
+            .block_on(async move {
+                http.send()
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .error_for_status()
+                    .map_err(|e| e.to_string())?
+                    .json()
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e: String| anyhow!("{e}"))?;
+        text.get("path")
+            .and_then(|p| p.as_str())
+            .map(str::to_string)
+            .context("respuesta sin path")
     }
 
     fn sync(&mut self) -> anyhow::Result<Option<String>> {

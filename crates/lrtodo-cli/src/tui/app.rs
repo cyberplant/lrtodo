@@ -504,6 +504,7 @@ impl App {
                     self.mode = Mode::Notes { id, offset: 0 };
                 }
             }
+            KeyCode::Char('p') if self.focus == Focus::Tasks => self.paste_asset(),
             KeyCode::Char('E') => {
                 if let Some(list) = self.current_list_id() {
                     self.effect = Some(Effect::Edit { list });
@@ -1065,6 +1066,51 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// `p`: pega la imagen del clipboard como adjunto de la tarea y
+    /// appendea `![img](ruta)` a la nota. Usa `pngpaste` (brew install pngpaste).
+    fn paste_asset(&mut self) {
+        let Some(list) = self.current_list_id() else {
+            return;
+        };
+        let Some((id, _)) = self.selected_task() else {
+            return;
+        };
+        let tmp = std::env::temp_dir().join(format!("lrtodo-{}.png", std::process::id()));
+        let ok = std::process::Command::new("pngpaste")
+            .arg(&tmp)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            self.flash = Some((
+                "no hay imagen en el clipboard (¿falta `brew install pngpaste`?)".into(),
+                Instant::now(),
+            ));
+            return;
+        }
+        let r = std::fs::read(&tmp).map_err(|e| anyhow::anyhow!("{e}"));
+        let _ = std::fs::remove_file(&tmp);
+        let result = r.and_then(|data| self.chan.add_asset(&list, &id, "img.png", &data));
+        match result {
+            Ok(rel) => {
+                // Append `![img](rel)` a la nota actual.
+                let notes = self
+                    .tasks
+                    .iter()
+                    .find(|t| t.task.id == id)
+                    .and_then(|t| t.task.notes.clone())
+                    .unwrap_or_default();
+                let notes = format!("{notes}\n\n![img]({rel})\n");
+                let r = self.chan.set(&list, &id, Change::Notes(Some(notes)));
+                if self.try_call("adjuntar", r).is_some() {
+                    self.refresh_tasks();
+                    self.flash = Some((format!("adjunto en {rel}"), Instant::now()));
+                }
+            }
+            Err(e) => self.flash = Some((format!("adjunto: {e:#}"), Instant::now())),
         }
     }
 

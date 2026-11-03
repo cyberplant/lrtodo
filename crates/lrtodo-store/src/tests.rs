@@ -215,3 +215,38 @@ fn check_reports_problems() {
     assert!(matches!(store.read("nada"), Err(StoreError::NotFound(_))));
     assert!(matches!(store.read("../x"), Err(StoreError::InvalidId(_))));
 }
+
+#[test]
+fn add_asset_achica_imagen() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), "test").unwrap();
+    store.create_list("c", None, Layout::Dir).unwrap();
+    let (loaded, _) = store
+        .mutate("c", |l| {
+            let op = add_op("c", "t1", "vender mac", 1);
+            l.doc.apply(&op, &l.meta.caps)
+        })
+        .unwrap();
+    let id = loaded.doc.tasks[0].id.clone();
+
+    // PNG 2000x1200 sin alpha → debería salir jpeg ≤1600px.
+    let img = image::RgbImage::new(2000, 1200);
+    let mut png = Vec::new();
+    use image::ImageEncoder as _;
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(img.as_raw(), 2000, 1200, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    let rel = store.add_asset("c", &id, "foto grande.png", &png).unwrap();
+    assert!(rel.ends_with(".jpg"), "rel: {rel}");
+    let out = image::load_from_memory(&std::fs::read(dir.path().join(&rel)).unwrap()).unwrap();
+    assert!(out.width() <= 1600 && out.height() <= 1600);
+    assert_eq!(out.width(), 1600); // 2000→1600, 1200→960
+
+    // Texto plano pasa tal cual.
+    let rel2 = store.add_asset("c", &id, "nota.txt", b"hola").unwrap();
+    assert!(
+        rel2.starts_with("c/") && rel2.ends_with(".assets/nota.txt"),
+        "rel2: {rel2}"
+    );
+    assert_eq!(std::fs::read(dir.path().join(&rel2)).unwrap(), b"hola");
+}

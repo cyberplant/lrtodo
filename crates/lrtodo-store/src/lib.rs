@@ -328,7 +328,16 @@ impl Store {
             .find(|(_, t)| t.id == task_id)
             .ok_or_else(|| StoreError::NotFound(task_id.into()))?;
         let stem = task_file_name(i, task).replace(".yaml", "");
-        let file = sanitize_asset_name(name);
+        // Si es imagen, la bajamos a un tamaño manejable (≤1600px) y
+        // re-encodeamos (jpeg q80; png si tiene alpha). Si no decodifica,
+        // se guarda tal cual (adjuntos no-imagen siguen sirviendo).
+        let (data, file) = match shrink_image(data, name) {
+            Some((bytes, ext)) => (
+                std::borrow::Cow::Owned(bytes),
+                rename_ext(&sanitize_asset_name(name), ext),
+            ),
+            None => (std::borrow::Cow::Borrowed(data), sanitize_asset_name(name)),
+        };
         let (dir, rel) = match loaded.layout {
             Layout::Dir => (
                 self.dir_path(list).join(format!("{stem}.assets")),
@@ -341,7 +350,7 @@ impl Store {
         };
         fs::create_dir_all(&dir).map_err(io_err(&dir))?;
         let path = dir.join(&file);
-        write_atomic(&path, data)?;
+        write_atomic(&path, &data)?;
         Ok(rel)
     }
 
@@ -705,7 +714,10 @@ fn slugify(title: &str) -> String {
 /// `git init` en `root` si no hay `.git`, con `.gitignore`, README y AGENTS.
 /// Errores se ignoran: el versionado nunca rompe un save.
 fn ensure_git(root: &Path) -> std::io::Result<()> {
+    // Adjuntos por git-lfs — corre también sobre repos ya inicializados,
+    // porque el .gitattributes pudo no existir.
     if root.join(".git").exists() {
+        ensure_lfs(root);
         return Ok(());
     }
     std::process::Command::new("git")
@@ -746,8 +758,11 @@ fn ensure_git(root: &Path) -> std::io::Result<()> {
              kind: subtask        # subtask | blocks | related\n\
          ```\n\n\
          Para crear una tarea agregá un `.yaml` con `title` (id opcional: lo\n\
-         toma del nombre del archivo). Para borrarla, borrá el archivo.\n",
+         toma del nombre del archivo). Para borrarla, borrá el archivo.\n\n\
+         Adjuntos: `<lista>.assets/` o `NNNN-slug.assets/` (imágenes etc.,\n\
+         bajadas a 1600px) — van por git-lfs.\n",
     )?;
+    ensure_lfs(root);
     let _ = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
@@ -816,5 +831,76 @@ fn sanitize_asset_name(name: &str) -> String {
         "adjunto".into()
     } else {
         clean.trim().to_string()
+    }
+}
+
+/// Tamaño máximo del lado mayor de las imágenes adjuntadas (px).
+const MAX_ASSET_DIM: u32 = 1600;
+
+/// Si `data` decodifica como imagen: baja la resolución a MAX_ASSET_DIM
+/// conservando aspecto y re-encodea (jpeg q80; png si tiene alpha).
+/// Devuelve `(bytes, ext)` o `None` si no era imagen.
+fn shrink_image(data: &[u8], _name: &str) -> Option<(Vec<u8>, &'static str)> {
+    use image::ImageEncoder;
+    use image::codecs::jpeg::JpegEncoder;
+    use image::codecs::png::PngEncoder;
+    let img = image::load_from_memory(data).ok()?;
+    let img = if img.width().max(img.height()) > MAX_ASSET_DIM {
+        img.resize(
+            MAX_ASSET_DIM,
+            MAX_ASSET_DIM,
+            image::imageops::FilterType::CatmullRom,
+        )
+    } else {
+        img
+    };
+    let mut out = Vec::new();
+    if img.color().has_alpha() {
+        PngEncoder::new(&mut out)
+            .write_image(
+                img.as_bytes(),
+                img.width(),
+                img.height(),
+                img.color().into(),
+            )
+            .ok()?;
+        Some((out, "png"))
+    } else {
+        JpegEncoder::new_with_quality(&mut out, 80)
+            .write_image(
+                img.as_bytes(),
+                img.width(),
+                img.height(),
+                img.color().into(),
+            )
+            .ok()?;
+        Some((out, "jpg"))
+    }
+}
+
+/// Cambia la extensión de un nombre de archivo (`foto.heic` → `foto.jpg`).
+fn rename_ext(name: &str, ext: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((base, _)) if !base.is_empty() => format!("{base}.{ext}"),
+        _ => format!("{name}.{ext}"),
+    }
+}
+
+/// `.gitattributes` con `*.assets/**` por LFS + `git lfs install --local`
+/// si git-lfs está instalado. Si falta, los binarios commitean normal.
+fn ensure_lfs(root: &Path) {
+    let attrs = root.join(".gitattributes");
+    if !attrs.exists() {
+        let _ = fs::write(&attrs, "*.assets/** filter=lfs diff=lfs merge=lfs -text\n");
+    }
+    let has_lfs = std::process::Command::new("git")
+        .args(["lfs", "version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if has_lfs {
+        let _ = std::process::Command::new("git")
+            .args(["-C", &*root.to_string_lossy(), "lfs", "install", "--local"])
+            .status();
     }
 }

@@ -76,22 +76,25 @@ fn dir_layout_and_convert() {
                 .apply(&add_op("casa", "B2", "regar", 2000), &Caps::ALL);
         })
         .unwrap();
-    assert!(dir.path().join("casa/B1.yaml").is_file());
+    // Los archivos son NNNN-slug.yaml (posición + slug del título).
+    assert!(dir.path().join("casa/0001-pintar.yaml").is_file());
     assert_eq!(titles(&store, "casa"), ["pintar", "regar"]);
 
     // Borrar un archivo a mano = borrar la tarea.
-    fs::remove_file(dir.path().join("casa/B1.yaml")).unwrap();
+    fs::remove_file(dir.path().join("casa/0001-pintar.yaml")).unwrap();
     assert_eq!(titles(&store, "casa"), ["regar"]);
-    // Un archivo nuevo a mano, sin id: toma el nombre del archivo.
+    // Un archivo nuevo a mano, sin id: toma el nombre del archivo; el
+    // save lo renombra a NNNN-slug (regar pasa a posición 1).
     fs::write(dir.path().join("casa/barrer.yaml"), "title: barrer\n").unwrap();
     assert_eq!(titles(&store, "casa").len(), 2);
+    assert!(dir.path().join("casa/0002-barrer.yaml").is_file());
 
     store.convert("casa", Layout::File).unwrap();
     assert!(!dir.path().join("casa").exists());
     assert_eq!(store.layout("casa").unwrap(), Layout::File);
     assert_eq!(titles(&store, "casa").len(), 2);
     store.convert("casa", Layout::Dir).unwrap();
-    assert!(dir.path().join("casa/barrer.yaml").is_file());
+    assert!(dir.path().join("casa/0002-barrer.yaml").is_file());
     assert_eq!(store.list_ids().unwrap(), ["casa"]);
 }
 

@@ -844,7 +844,10 @@ fn shrink_image(data: &[u8], _name: &str) -> Option<(Vec<u8>, &'static str)> {
     use image::ImageEncoder;
     use image::codecs::jpeg::JpegEncoder;
     use image::codecs::png::PngEncoder;
-    let img = image::load_from_memory(data).ok()?;
+    let mut img = image::load_from_memory(data).ok()?;
+    // Orientación EXIF (fotos del celular vienen rotadas como flag, no
+    // como píxeles — sin esto quedan de lado o boca abajo).
+    img = apply_exif_orientation(data, img);
     let img = if img.width().max(img.height()) > MAX_ASSET_DIM {
         img.resize(
             MAX_ASSET_DIM,
@@ -902,5 +905,29 @@ fn ensure_lfs(root: &Path) {
         let _ = std::process::Command::new("git")
             .args(["-C", &*root.to_string_lossy(), "lfs", "install", "--local"])
             .status();
+    }
+}
+
+/// Aplica la orientación EXIF (fotos del celular): la flag EXIF dice cómo
+/// rotar/mirrorar los píxeles para ver la foto "de pie".
+fn apply_exif_orientation(data: &[u8], img: image::DynamicImage) -> image::DynamicImage {
+    let mut cur = std::io::Cursor::new(data);
+    let o = exif::Reader::new()
+        .read_from_container(&mut cur)
+        .ok()
+        .and_then(|e| {
+            e.get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+                .and_then(|f| f.value.get_uint(0))
+        })
+        .unwrap_or(1);
+    match o {
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.fliph().rotate270(),
+        6 => img.rotate270(),
+        7 => img.fliph().rotate90(),
+        8 => img.rotate90(),
+        _ => img,
     }
 }

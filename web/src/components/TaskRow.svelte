@@ -41,10 +41,32 @@
   }
 
   /// Markdown → HTML: los `src` relativos (adjuntos del data_dir) se
-  /// sirven por `api/files/`.
+  /// sirven por `api/files/`; `?r=N` en la URL rota la imagen N grados.
   function renderMd(md: string): string {
     const html = marked.parse(md) as string;
-    return html.replace(/src="(?!https?:|data:|\/)/g, 'src="api/files/');
+    return html
+      .replace(/src="(?!https?:|data:|\/)/g, 'src="api/files/')
+      .replace(/src="([^"]*?)\?r=(\d+)"/g, 'src="$1" style="transform:rotate($2deg)"');
+  }
+
+  /// "↻": incrementa en 90° el `?r=` de la última imagen de la nota
+  /// (o se lo agrega). 360 → lo quita.
+  function rotarImagen() {
+    const re = /!\[[^\]]*\]\([^)]+\)/g;
+    let m: RegExpExecArray | null, last: RegExpExecArray | undefined;
+    while ((m = re.exec(notes))) last = m;
+    if (!last) return;
+    const link = last[0];
+    let updated: string;
+    if (/\?r=\d+/.test(link)) {
+      updated = link.replace(/\?r=(\d+)/, (_, r) => {
+        const n = (+r + 90) % 360;
+        return n === 0 ? '' : `?r=${n}`;
+      });
+    } else {
+      updated = link.replace(/\)/, '?r=90)');
+    }
+    notes = notes.slice(0, last.index) + updated + notes.slice(last.index + link.length);
   }
 
   /// Pega una imagen del clipboard en las notas: sube el archivo a
@@ -120,6 +142,9 @@
           onpaste={onPaste}
         ></textarea>
         {#if uploading}<span class="notes">subiendo imagen…</span>{/if}
+        {#if notes.includes('![')}
+          <button type="button" class="mini" onclick={rotarImagen} title="rota la última imagen 90°">↻ rotar imagen</button>
+        {/if}
         {#if notes.trim()}
           <div class="md-preview">{@html renderMd(notes)}</div>
         {/if}

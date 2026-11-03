@@ -505,6 +505,7 @@ impl App {
                 }
             }
             KeyCode::Char('p') if self.focus == Focus::Tasks => self.paste_asset(),
+            KeyCode::Char('R') if self.focus == Focus::Tasks => self.rotate_last_img(),
             KeyCode::Char('E') => {
                 if let Some(list) = self.current_list_id() {
                     self.effect = Some(Effect::Edit { list });
@@ -1114,6 +1115,32 @@ impl App {
         }
     }
 
+    /// `R`: incrementa en 90° el `?r=` de la última imagen de la nota
+    /// (o se lo agrega); la PWA lo renderiza como CSS rotate.
+    fn rotate_last_img(&mut self) {
+        let Some(list) = self.current_list_id() else {
+            return;
+        };
+        let Some((id, _)) = self.selected_task() else {
+            return;
+        };
+        let notes = self
+            .tasks
+            .iter()
+            .find(|t| t.task.id == id)
+            .and_then(|t| t.task.notes.clone())
+            .unwrap_or_default();
+        let updated = bump_img_rotation(&notes);
+        if updated == notes {
+            return; // sin imágenes
+        }
+        let r = self.chan.set(&list, &id, Change::Notes(Some(updated)));
+        if self.try_call("rotar", r).is_some() {
+            self.refresh_tasks();
+            self.flash = Some(("imagen rotada 90°".into(), Instant::now()));
+        }
+    }
+
     fn toggle(&mut self) {
         let Some(list) = self.current_list_id() else {
             return;
@@ -1142,4 +1169,63 @@ fn id_slug(name: &str) -> String {
         }
     }
     slug.trim_end_matches('_').to_string()
+}
+
+/// Incrementa en 90° el `?r=` del último `![alt](path?r=N)` de `notes`
+/// (o agrega `?r=90`); 360 → se quita (queda sin rotación).
+fn bump_img_rotation(notes: &str) -> String {
+    let Some(close) = notes.rfind(')') else {
+        return notes.to_string();
+    };
+    // Último `![` antes del `)` más cercano al final — exige que el link
+    // sea `![alt](path)` hasta ese `)`.
+    let Some(img) = notes[..close].rfind("![") else {
+        return notes.to_string();
+    };
+    let inner = &notes[img + 2..close];
+    let Some(paren) = inner.find("](") else {
+        return notes.to_string();
+    };
+    let path = &inner[paren + 2..];
+    if !path.contains(".") || path.contains(' ') {
+        return notes.to_string(); // no es un link de archivo
+    }
+    let (base, rot) = match path.split_once("?r=") {
+        Some((b, r)) => (b, r.parse::<u32>().unwrap_or(0)),
+        None => (path, 0),
+    };
+    let n = (rot + 90) % 360;
+    let new_path = if n == 0 {
+        base.to_string()
+    } else {
+        format!("{base}?r={n}")
+    };
+    format!(
+        "{}{new_path}){}",
+        &notes[..img + 2 + paren + 2],
+        &notes[close + 1..]
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bump_img_rotation;
+
+    #[test]
+    fn bump_rota_y_da_vuelta() {
+        let md = "x\n\n![img](c/0001-v.assets/f.png)\n";
+        let a = bump_img_rotation(md);
+        assert!(a.contains("f.png?r=90"), "{a}");
+        let b = bump_img_rotation(&a);
+        assert!(b.contains("f.png?r=180"), "{b}");
+        let c = bump_img_rotation(&bump_img_rotation(&bump_img_rotation(&a)));
+        assert!(c.contains("f.png)") && !c.contains("?r="), "{c}");
+    }
+
+    #[test]
+    fn bump_no_toca_sin_imagen() {
+        let md = "texto [link](http://x)";
+        assert_eq!(bump_img_rotation(md), md);
+        assert_eq!(bump_img_rotation(""), "");
+    }
 }

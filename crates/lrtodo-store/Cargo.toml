@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 blake3.workspace = true
 image.workspace = true
+kamadak-exif.workspace = true
 lrtodo-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
